@@ -16,6 +16,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
+TITHING_RATE = 0.10
+
 SHEETS = {
     "productos": {
         "name": "Productos",
@@ -458,11 +460,13 @@ def page_registrar_pedido():
         total = cart_df["total_linea"].sum()
         profit = cart_df["ganancia_personal_linea"].sum()
         norte = cart_df["dinero_norte_linea"].sum()
+        tithing = round(profit * TITHING_RATE, 2)
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         col1.metric("Total a pagar", pesos(total))
         col2.metric("Ganancia para mí", pesos(profit))
-        col3.metric("Para Norte Brunch", pesos(norte))
+        col3.metric("Diezmo sugerido", pesos(tithing))
+        col4.metric("Para Norte Brunch", pesos(norte))
 
         col_save, col_clear = st.columns(2)
 
@@ -486,10 +490,11 @@ def page_registrar_pedido():
             saldos = get_saldos()
             change_saldo(saldos, "dinero_norte_brunch", total)
             change_saldo(saldos, "ganancia_pendiente_personal", profit)
+            change_saldo(saldos, "diezmo_pendiente", tithing)
             save_saldos(saldos)
 
             st.session_state.cart = []
-            st.success("Pedido guardado correctamente.")
+            st.success(f"Pedido guardado correctamente. Diezmo pendiente agregado: {pesos(tithing)}")
             st.rerun()
 
         if col_clear.button("Vaciar pedido"):
@@ -631,11 +636,8 @@ def page_saldos_local():
             change_saldo(saldos, "dinero_familiar", amount)
             change_saldo(saldos, "ingresos_familiares_totales", amount)
 
-            diezmo = round(amount * 0.10, 2)
-            change_saldo(saldos, "diezmo_pendiente", diezmo)
-
             append_row("gastos_familiares", [now_text(), "ingreso", "otros", amount, "Pago de ganancia de Norte Brunch"])
-            st.success(f"Ganancia pagada. Diezmo sugerido agregado como pendiente: {pesos(diezmo)}")
+            st.success("Ganancia pagada. El diezmo ya fue calculado cuando se registraron las ventas.")
 
         elif action == "Registrar inversión inicial":
             change_saldo(saldos, "dinero_norte_brunch", amount)
@@ -856,6 +858,8 @@ def page_finanzas_familiares():
 
 def page_diezmo():
     st.header("Diezmo")
+
+    st.info("El diezmo pendiente se calcula automáticamente como el 10% de la ganancia personal al guardar cada pedido.")
 
     saldos = get_saldos()
     frecuencia_actual = get_config_value("frecuencia_diezmo", "mensual")
