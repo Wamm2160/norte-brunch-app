@@ -32,7 +32,7 @@ SHEETS = {
         "default_rows": [
             ["Torta de adobada", 95, 40, "si"],
             ["Torta de pierna", 100, 40, "si"],
-            ["Torta mixta", 125, 45, "si"],
+            ["Torta mixta", 125, 40, "si"],
             ["Pastel", 45, 15, "si"],
             ["Cafe", 20, 10, "si"],
             ["Refresco", 30, 10, "si"],
@@ -175,6 +175,12 @@ SHEETS = {
             ["gastos_familiares_totales", 0],
             ["diezmo_pendiente", 0],
             ["diezmo_pagado", 0],
+            ["ventas_totales_brutas", 0],
+            ["ventas_totales_netas", 0],
+            ["total_para_norte", 0],
+            ["total_para_paga_personal", 0],
+            ["total_para_diezmo", 0],
+            ["total_comisiones_terminal", 0],
         ],
     },
     "diezmos": {
@@ -212,10 +218,50 @@ SHEETS = {
 
 
 REQUIRED_PRODUCT_PRICES = {
-    "Torta mixta": {"precio": 125, "ganancia_personal": 45},
+    "Torta mixta": {"precio": 125, "ganancia_personal": 40},
     "Agua de litro": {"precio": 45, "ganancia_personal": 25},
     "Agua de medio litro": {"precio": 30, "ganancia_personal": 20},
 }
+
+
+def is_torta(product_name):
+    """Regla fuerte: cualquier producto que contenga 'torta' cuenta como torta."""
+    return "torta" in str(product_name).strip().lower()
+
+
+def get_personal_profit_unit(product_name, stored_profit=0):
+    """Ganancia personal por unidad.
+
+    Regla de Wilson:
+    - Toda torta deja $40 de ganancia personal, sin importar cuál elija el cliente.
+    - Otros productos usan la ganancia guardada en Productos.
+    """
+    if is_torta(product_name):
+        return 40.0
+    return to_float(stored_profit)
+
+
+def calculate_line_financials(product_name, quantity, unit_price, stored_profit=0, card_fee_line=0):
+    """Calcula una línea de venta con la lógica correcta."""
+    quantity = to_float(quantity)
+    unit_price = to_float(unit_price)
+    card_fee_line = to_float(card_fee_line)
+
+    unit_profit = get_personal_profit_unit(product_name, stored_profit)
+    total_line = round(quantity * unit_price, 2)
+    personal_profit_line = round(quantity * unit_profit, 2)
+    tithing_line = round(personal_profit_line * TITHING_RATE, 2)
+    norte_line = round(total_line - personal_profit_line - card_fee_line, 2)
+    net_line = round(total_line - card_fee_line, 2)
+
+    return {
+        "unit_profit": unit_profit,
+        "total_line": total_line,
+        "personal_profit_line": personal_profit_line,
+        "tithing_line": tithing_line,
+        "norte_line": norte_line,
+        "net_line": net_line,
+    }
 
 
 # -----------------------------
@@ -391,6 +437,11 @@ def ensure_required_product_prices():
             "ganancia_personal": row.get("ganancia_personal", 0),
             "activo": row.get("activo", "si"),
         }
+
+        if is_torta(product):
+            if to_float(record["ganancia_personal"]) != 40.0:
+                record["ganancia_personal"] = 40
+                changed = True
 
         if product in REQUIRED_PRODUCT_PRICES:
             expected = REQUIRED_PRODUCT_PRICES[product]
@@ -761,6 +812,99 @@ def change_saldo(saldos, key, amount):
     saldos[key] = round(to_float(saldos.get(key, 0)) + float(amount), 2)
 
 
+def normalize_ventas_financials(ventas):
+    """Corrige columnas financieras de ventas para reportes usando reglas actuales."""
+    if ventas.empty:
+        return ventas
+
+    ventas = ventas.copy()
+    for col in [
+        "ganancia_personal_unitaria",
+        "ganancia_personal_linea",
+        "diezmo_linea",
+        "dinero_norte_linea",
+        "total_neto_linea",
+        "comision_terminal_linea",
+    ]:
+        if col not in ventas.columns:
+            ventas[col] = 0
+
+    for idx, row in ventas.iterrows():
+        fee = to_float(row.get("comision_terminal_linea", 0))
+        calc = calculate_line_financials(
+            row.get("producto", ""),
+            to_float(row.get("cantidad", 0)),
+            to_float(row.get("precio_unitario", 0)),
+            to_float(row.get("ganancia_personal_unitaria", 0)),
+            card_fee_line=fee,
+        )
+        ventas.at[idx, "ganancia_personal_unitaria"] = calc["unit_profit"]
+        ventas.at[idx, "ganancia_personal_linea"] = calc["personal_profit_line"]
+        ventas.at[idx, "diezmo_linea"] = calc["tithing_line"]
+        ventas.at[idx, "dinero_norte_linea"] = calc["norte_line"]
+        ventas.at[idx, "total_neto_linea"] = calc["net_line"]
+
+    return ventas
+
+
+def calculate_general_sales_totals_from_ventas():
+    """Recalcula totales generales usando la hoja Ventas con las reglas actuales."""
+    ventas = load_df("ventas")
+    if ventas.empty:
+        return {
+            "ventas_totales_brutas": 0,
+            "ventas_totales_netas": 0,
+            "total_para_norte": 0,
+            "total_para_paga_personal": 0,
+            "total_para_diezmo": 0,
+            "total_comisiones_terminal": 0,
+        }
+
+    ventas = to_numeric(ventas, [
+        "cantidad",
+        "precio_unitario",
+        "total_linea",
+        "ganancia_personal_unitaria",
+        "monto_tarjeta_linea",
+        "comision_terminal_linea",
+        "total_neto_linea",
+    ])
+    ventas = normalize_ventas_financials(ventas)
+
+    return {
+        "ventas_totales_brutas": round(ventas["total_linea"].sum(), 2),
+        "ventas_totales_netas": round(ventas["total_neto_linea"].sum(), 2),
+        "total_para_norte": round(ventas["dinero_norte_linea"].sum(), 2),
+        "total_para_paga_personal": round(ventas["ganancia_personal_linea"].sum(), 2),
+        "total_para_diezmo": round(ventas["diezmo_linea"].sum(), 2),
+        "total_comisiones_terminal": round(ventas["comision_terminal_linea"].sum(), 2),
+    }
+
+
+def recalculate_general_sales_saldos():
+    """Actualiza saldos generales y corrige pendientes de paga/diezmo usando Ventas."""
+    totals = calculate_general_sales_totals_from_ventas()
+    saldos = get_saldos()
+
+    for key, value in totals.items():
+        saldos[key] = value
+
+    saldos["ganancia_pendiente_personal"] = round(
+        totals["total_para_paga_personal"] - to_float(saldos.get("ganancia_pagada_personal", 0)),
+        2,
+    )
+    saldos["diezmo_pendiente"] = round(
+        totals["total_para_diezmo"] - to_float(saldos.get("diezmo_pagado", 0)),
+        2,
+    )
+
+    saldos["ganancia_pendiente_personal"] = max(0, saldos["ganancia_pendiente_personal"])
+    saldos["diezmo_pendiente"] = max(0, saldos["diezmo_pendiente"])
+
+    save_saldos(saldos)
+    return totals
+
+
 def get_config_value(key, default=""):
     df = load_df("config")
     if not df.empty:
@@ -1045,6 +1189,10 @@ def page_productos():
             st.error("Escribe el nombre del producto.")
             return
 
+        if is_torta(producto):
+            ganancia = 40
+            st.info("Regla aplicada: toda torta deja $40 de ganancia personal.")
+
         df = load_df("productos")
         records = []
         updated = False
@@ -1120,23 +1268,21 @@ def update_pedido_estado(pedido_id, new_status):
 
 def add_product_to_cart(products, product, quantity=1):
     row = products[products["producto"] == product].iloc[0]
+    product_name = str(row["producto"])
     unit_price = to_float(row["precio"])
-    unit_profit = to_float(row["ganancia_personal"])
+    stored_profit = to_float(row["ganancia_personal"])
 
-    line_total = round(quantity * unit_price, 2)
-    line_profit = round(quantity * unit_profit, 2)
-    line_norte = round(line_total - line_profit, 2)
-    line_tithing = round(line_profit * TITHING_RATE, 2)
+    line = calculate_line_financials(product_name, quantity, unit_price, stored_profit)
 
     st.session_state.cart.append({
-        "producto": product,
+        "producto": product_name,
         "cantidad": int(quantity),
         "precio_unitario": unit_price,
-        "ganancia_personal_unitaria": unit_profit,
-        "total_linea": line_total,
-        "ganancia_personal_linea": line_profit,
-        "dinero_norte_linea": line_norte,
-        "diezmo_linea": line_tithing,
+        "ganancia_personal_unitaria": line["unit_profit"],
+        "total_linea": line["total_line"],
+        "ganancia_personal_linea": line["personal_profit_line"],
+        "dinero_norte_linea": line["norte_line"],
+        "diezmo_linea": line["tithing_line"],
     })
 
 
@@ -1238,28 +1384,26 @@ def get_order_lines_with_rows(pedido_id):
 
 
 def append_line_to_pending_order(pedido_id, pedido_numero, fecha, product_row, quantity, note):
+    product_name = str(product_row["producto"])
     unit_price = to_float(product_row["precio"])
-    unit_profit = to_float(product_row["ganancia_personal"])
+    stored_profit = to_float(product_row["ganancia_personal"])
     quantity = int(quantity)
 
-    line_total = round(quantity * unit_price, 2)
-    line_profit = round(quantity * unit_profit, 2)
-    line_norte = round(line_total - line_profit, 2)
-    line_tithing = round(line_profit * TITHING_RATE, 2)
+    line = calculate_line_financials(product_name, quantity, unit_price, stored_profit)
 
     append_record("pedidos", {
         **fecha,
         "pedido_id": pedido_id,
         "pedido_numero": pedido_numero,
         "estado": "pendiente",
-        "producto": product_row["producto"],
+        "producto": product_name,
         "cantidad": quantity,
         "precio_unitario": unit_price,
-        "ganancia_personal_unitaria": unit_profit,
-        "total_linea": line_total,
-        "ganancia_personal_linea": line_profit,
-        "dinero_norte_linea": line_norte,
-        "diezmo_linea": line_tithing,
+        "ganancia_personal_unitaria": line["unit_profit"],
+        "total_linea": line["total_line"],
+        "ganancia_personal_linea": line["personal_profit_line"],
+        "dinero_norte_linea": line["norte_line"],
+        "diezmo_linea": line["tithing_line"],
         "nota": note,
     })
 
@@ -1308,8 +1452,6 @@ def pay_pending_order(pedido_id, payment_date, method, amounts, note):
     ])
 
     total = round(df["total_linea"].sum(), 2)
-    profit = round(df["ganancia_personal_linea"].sum(), 2)
-    tithing = round(df["diezmo_linea"].sum(), 2)
 
     if abs(amounts["paid_total"] - total) > 0.01:
         st.error(f"El total pagado debe ser igual a {pesos(total)}.")
@@ -1319,51 +1461,92 @@ def pay_pending_order(pedido_id, payment_date, method, amounts, note):
         st.error("El pedido tiene total cero.")
         return
 
-    for _, line in df.iterrows():
-        share = to_float(line["total_linea"]) / total
+    total_profit = 0
+    total_tithing = 0
+    total_norte = 0
+    total_net = 0
+    total_fee = 0
+
+    for _, line_row in df.iterrows():
+        share = to_float(line_row["total_linea"]) / total
 
         cash_line = round(amounts["cash"] * share, 2)
         card_line = round(amounts["card"] * share, 2)
         transfer_line = round(amounts["transfer"] * share, 2)
         fee_line = round(card_line * CARD_FEE_RATE, 2)
 
-        total_line = to_float(line["total_linea"])
-        profit_line = to_float(line["ganancia_personal_linea"])
-        net_line = round(total_line - fee_line, 2)
-        norte_line = round(total_line - profit_line - fee_line, 2)
+        product_name = str(line_row.get("producto", ""))
+        quantity = to_float(line_row.get("cantidad", 0))
+        unit_price = to_float(line_row.get("precio_unitario", 0))
+        stored_profit = to_float(line_row.get("ganancia_personal_unitaria", 0))
+
+        line_calc = calculate_line_financials(
+            product_name,
+            quantity,
+            unit_price,
+            stored_profit,
+            card_fee_line=fee_line,
+        )
+
+        total_profit += line_calc["personal_profit_line"]
+        total_tithing += line_calc["tithing_line"]
+        total_norte += line_calc["norte_line"]
+        total_net += line_calc["net_line"]
+        total_fee += fee_line
 
         append_record("ventas", {
             **payment_date,
-            "pedido_id": line.get("pedido_id", pedido_id),
-            "pedido_numero": line.get("pedido_numero", ""),
-            "producto": line.get("producto", ""),
-            "cantidad": line.get("cantidad", 0),
-            "precio_unitario": line.get("precio_unitario", 0),
-            "ganancia_personal_unitaria": line.get("ganancia_personal_unitaria", 0),
-            "total_linea": total_line,
-            "ganancia_personal_linea": profit_line,
-            "dinero_norte_linea": norte_line,
-            "diezmo_linea": line.get("diezmo_linea", 0),
+            "pedido_id": line_row.get("pedido_id", pedido_id),
+            "pedido_numero": line_row.get("pedido_numero", ""),
+            "producto": product_name,
+            "cantidad": quantity,
+            "precio_unitario": unit_price,
+            "ganancia_personal_unitaria": line_calc["unit_profit"],
+            "total_linea": line_calc["total_line"],
+            "ganancia_personal_linea": line_calc["personal_profit_line"],
+            "dinero_norte_linea": line_calc["norte_line"],
+            "diezmo_linea": line_calc["tithing_line"],
             "metodo_pago": method,
             "monto_efectivo_linea": cash_line,
             "monto_tarjeta_linea": card_line,
             "monto_transferencia_linea": transfer_line,
             "comision_terminal_linea": fee_line,
-            "total_neto_linea": net_line,
+            "total_neto_linea": line_calc["net_line"],
             "nota": note,
         })
+
+    total_profit = round(total_profit, 2)
+    total_tithing = round(total_tithing, 2)
+    total_norte = round(total_norte, 2)
+    total_net = round(total_net, 2)
+    total_fee = round(total_fee, 2)
 
     update_pedido_estado(pedido_id, "pagado")
 
     saldos = get_saldos()
-    change_saldo(saldos, "dinero_norte_brunch", amounts["net_received"])
-    change_saldo(saldos, "ganancia_pendiente_personal", profit)
-    change_saldo(saldos, "diezmo_pendiente", tithing)
+
+    # Dinero físico/digital que entra a Norte Brunch antes de pagarte a ti.
+    change_saldo(saldos, "dinero_norte_brunch", total_net)
+
+    # Tu paga y diezmo se separan automáticamente.
+    change_saldo(saldos, "ganancia_pendiente_personal", total_profit)
+    change_saldo(saldos, "diezmo_pendiente", total_tithing)
+
+    # Totales generales acumulados de ventas.
+    change_saldo(saldos, "ventas_totales_brutas", total)
+    change_saldo(saldos, "ventas_totales_netas", total_net)
+    change_saldo(saldos, "total_para_norte", total_norte)
+    change_saldo(saldos, "total_para_paga_personal", total_profit)
+    change_saldo(saldos, "total_para_diezmo", total_tithing)
+    change_saldo(saldos, "total_comisiones_terminal", total_fee)
+
     save_saldos(saldos)
 
-    big_green_amount("PEDIDO PAGADO", amounts["net_received"])
+    big_green_amount("PEDIDO PAGADO", total_net)
     st.success(
-        f"Pedido pagado. Total bruto: {pesos(total)} | Comisión terminal: {pesos(amounts['terminal_fee'])} | Neto recibido: {pesos(amounts['net_received'])}"
+        f"Pedido pagado. Venta bruta: {pesos(total)} | Para tu paga: {pesos(total_profit)} | "
+        f"Diezmo: {pesos(total_tithing)} | Para Norte Brunch: {pesos(total_norte)} | "
+        f"Comisión terminal: {pesos(total_fee)} | Neto recibido: {pesos(total_net)}"
     )
     st.rerun()
 
@@ -1855,6 +2038,7 @@ def page_reportes_local():
         "total_neto_linea",
     ])
     gastos = to_numeric(gastos, ["costo_total"])
+    ventas = normalize_ventas_financials(ventas)
 
     total_ventas = ventas["total_linea"].sum() if not ventas.empty else 0
     total_recibido = ventas["total_neto_linea"].sum() if "total_neto_linea" in ventas.columns and not ventas.empty else total_ventas
@@ -1946,6 +2130,7 @@ def page_corte_caja():
         "total_neto_linea",
     ])
     gastos = to_numeric(gastos, ["costo_total"])
+    ventas = normalize_ventas_financials(ventas)
 
     if ventas.empty:
         st.warning("No hay ventas pagadas en esa fecha.")
@@ -2256,6 +2441,29 @@ def page_saldos_local():
     c5.metric("Inversión recuperada", pesos(saldos["inversion_pagada_personal"]))
     c6.metric("Disponible para deuda", pesos(disponible_deuda))
 
+    st.divider()
+    st.subheader("Total general de ventas")
+    g1, g2, g3 = st.columns(3)
+    g1.metric("Ventas totales brutas", pesos(saldos.get("ventas_totales_brutas", 0)))
+    g2.metric("Ventas netas recibidas", pesos(saldos.get("ventas_totales_netas", 0)))
+    g3.metric("Comisiones terminal", pesos(saldos.get("total_comisiones_terminal", 0)))
+
+    g4, g5, g6 = st.columns(3)
+    g4.metric("Para Norte Brunch", pesos(saldos.get("total_para_norte", 0)))
+    g5.metric("Para mi paga", pesos(saldos.get("total_para_paga_personal", 0)))
+    g6.metric("Para diezmo", pesos(saldos.get("total_para_diezmo", 0)))
+
+    if st.button("Recalcular totales generales desde Ventas"):
+        totals = recalculate_general_sales_saldos()
+        st.success(
+            "Totales recalculados: "
+            f"Ventas {pesos(totals['ventas_totales_brutas'])}, "
+            f"Norte {pesos(totals['total_para_norte'])}, "
+            f"Mi paga {pesos(totals['total_para_paga_personal'])}, "
+            f"Diezmo {pesos(totals['total_para_diezmo'])}."
+        )
+        st.rerun()
+
     st.info("La deuda hacia ti se genera automáticamente cuando pagas gastos de Norte Brunch con dinero personal/familiar.")
 
     if status["debt"] <= 0:
@@ -2339,7 +2547,7 @@ def page_pago_personal():
 
 def page_diezmo():
     st.header("Diezmo")
-    st.info("El diezmo pendiente se calcula automáticamente como 10% de la ganancia personal al guardar cada pedido.")
+    st.info("El diezmo pendiente se calcula automáticamente como 10% de tu ganancia personal. Regla: cada torta deja $40 de ganancia personal, por lo tanto genera $4 de diezmo por torta.")
 
     saldos = get_saldos()
     frecuencia = get_config_value("frecuencia_diezmo", "mensual")
