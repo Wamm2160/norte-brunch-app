@@ -500,6 +500,91 @@ def apply_branding():
             border-radius: 14px;
             font-weight: 700;
         }
+
+        /* Corrección de contraste: fondo claro + letras oscuras */
+        .stApp,
+        .stApp p,
+        .stApp div,
+        .stApp span,
+        .stApp label,
+        .stApp h1,
+        .stApp h2,
+        .stApp h3,
+        .stApp h4,
+        .stApp h5,
+        .stApp h6 {
+            color: #1F2933 !important;
+        }
+
+        [data-testid="stMarkdownContainer"] p,
+        [data-testid="stMarkdownContainer"] li,
+        [data-testid="stMarkdownContainer"] span {
+            color: #1F2933 !important;
+        }
+
+        [data-testid="stMetric"] label,
+        [data-testid="stMetricValue"],
+        [data-testid="stMetricDelta"] {
+            color: #1F2933 !important;
+        }
+
+        [data-testid="stSidebar"],
+        [data-testid="stSidebar"] p,
+        [data-testid="stSidebar"] div,
+        [data-testid="stSidebar"] span,
+        [data-testid="stSidebar"] label {
+            color: #1F2933 !important;
+        }
+
+        input,
+        textarea,
+        [data-baseweb="input"] input,
+        [data-baseweb="textarea"] textarea {
+            color: #111827 !important;
+            background-color: #FFFFFF !important;
+        }
+
+        [data-baseweb="select"] div,
+        [data-baseweb="select"] span {
+            color: #111827 !important;
+        }
+
+        .stButton > button {
+            color: #FFFFFF !important;
+            background-color: #D8891E;
+            border-radius: 10px;
+            font-weight: 800;
+        }
+
+        .stButton > button p,
+        .stButton > button div,
+        .stButton > button span {
+            color: #FFFFFF !important;
+        }
+
+        .nb-subtitle {
+            color: #3A2A1A !important;
+        }
+
+        .nb-total-red,
+        .nb-total-red div,
+        .nb-total-red span {
+            color: #1F2933 !important;
+        }
+
+        .nb-total-red .amount {
+            color: #D32F2F !important;
+        }
+
+        .nb-total-green,
+        .nb-total-green div,
+        .nb-total-green span {
+            color: #1F2933 !important;
+        }
+
+        .nb-total-green .amount {
+            color: #2E7D32 !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
