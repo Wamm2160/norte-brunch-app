@@ -902,6 +902,242 @@ def check_password():
     return False
 
 
+
+# -----------------------------
+# ESTILO NORTE BRUNCH
+# -----------------------------
+
+def apply_norte_brunch_style():
+    """Aplica estilo visual inspirado en el local Norte Brunch."""
+    st.markdown(
+        """
+        <style>
+        :root {
+            --nb-black: #080807;
+            --nb-charcoal: #151515;
+            --nb-panel: #1f1d1a;
+            --nb-cream: #F4E8D2;
+            --nb-muted: #C9BDA8;
+            --nb-orange: #D8891E;
+            --nb-orange-dark: #A85F0E;
+            --nb-red: #8B1E1E;
+            --nb-green: #2E7D32;
+            --nb-border: #3A332B;
+        }
+
+        .stApp {
+            background:
+                radial-gradient(circle at top left, rgba(216,137,30,0.10), transparent 26rem),
+                linear-gradient(180deg, #0b0b0a 0%, #151515 100%);
+            color: var(--nb-cream);
+        }
+
+        h1, h2, h3 {
+            color: var(--nb-cream) !important;
+            letter-spacing: .5px;
+        }
+
+        p, label, span, div {
+            color: inherit;
+        }
+
+        [data-testid="stSidebar"] {
+            background: #0A0A09;
+            border-right: 1px solid var(--nb-border);
+        }
+
+        [data-testid="stSidebar"] * {
+            color: var(--nb-cream) !important;
+        }
+
+        .stButton > button {
+            background: linear-gradient(180deg, #D8891E, #A85F0E);
+            color: #111 !important;
+            border: 1px solid #E0A245;
+            border-radius: 12px;
+            font-weight: 800;
+            min-height: 3rem;
+            box-shadow: 0 2px 0 rgba(0,0,0,.35);
+        }
+
+        .stButton > button:hover {
+            background: linear-gradient(180deg, #F0A032, #C06B11);
+            color: #000 !important;
+            border-color: #F3B75F;
+        }
+
+        div[data-testid="stMetric"] {
+            background: rgba(31,29,26,.92);
+            border: 1px solid var(--nb-border);
+            border-radius: 14px;
+            padding: 1rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,.25);
+        }
+
+        div[data-testid="stMetric"] label {
+            color: var(--nb-muted) !important;
+        }
+
+        div[data-testid="stMetricValue"] {
+            color: var(--nb-cream) !important;
+        }
+
+        .stDataFrame, .stTable {
+            background: var(--nb-panel);
+            border-radius: 12px;
+        }
+
+        div[data-baseweb="tab-list"] {
+            gap: .4rem;
+        }
+
+        button[data-baseweb="tab"] {
+            background: #141414;
+            border-radius: 10px 10px 0 0;
+            border: 1px solid var(--nb-border);
+            color: var(--nb-cream) !important;
+        }
+
+        button[data-baseweb="tab"][aria-selected="true"] {
+            background: var(--nb-orange);
+            color: #111 !important;
+            font-weight: 900;
+        }
+
+        .nb-header {
+            background: linear-gradient(90deg, #0A0A09 0%, #18140f 54%, #0A0A09 100%);
+            border: 1px solid var(--nb-border);
+            border-radius: 18px;
+            padding: 1rem 1.2rem;
+            margin-bottom: 1.1rem;
+            text-align: center;
+            box-shadow: 0 4px 18px rgba(0,0,0,.35);
+        }
+
+        .nb-header-title {
+            font-size: 2.1rem;
+            font-weight: 900;
+            color: var(--nb-cream);
+            margin: .3rem 0 0 0;
+            line-height: 1.1;
+        }
+
+        .nb-header-subtitle {
+            color: var(--nb-orange);
+            font-weight: 700;
+            letter-spacing: .08rem;
+            margin-top: .2rem;
+        }
+
+        .nb-total-red {
+            background: linear-gradient(180deg, #1A0C0C, #290D0D);
+            border: 2px solid var(--nb-red);
+            border-radius: 18px;
+            padding: 1rem;
+            text-align: center;
+            margin: 1rem 0;
+            box-shadow: 0 0 0 3px rgba(139,30,30,.20);
+        }
+
+        .nb-total-red .label {
+            color: var(--nb-muted);
+            font-size: 1rem;
+            font-weight: 800;
+            letter-spacing: .08rem;
+        }
+
+        .nb-total-red .amount {
+            color: #FF4B4B;
+            font-size: 3rem;
+            font-weight: 1000;
+            line-height: 1.05;
+        }
+
+        .nb-total-green {
+            background: linear-gradient(180deg, #102415, #0B3515);
+            border: 2px solid var(--nb-green);
+            border-radius: 18px;
+            padding: 1rem;
+            text-align: center;
+            margin: 1rem 0;
+            box-shadow: 0 0 0 3px rgba(46,125,50,.20);
+        }
+
+        .nb-total-green .label {
+            color: #DDF0DD;
+            font-size: 1rem;
+            font-weight: 800;
+            letter-spacing: .08rem;
+        }
+
+        .nb-total-green .amount {
+            color: #5CFF76;
+            font-size: 2.6rem;
+            font-weight: 1000;
+            line-height: 1.05;
+        }
+
+        .nb-warning-card {
+            background: rgba(216,137,30,.12);
+            border: 1px solid var(--nb-orange);
+            border-radius: 14px;
+            padding: 1rem;
+            color: var(--nb-cream);
+        }
+
+        .nb-small-note {
+            color: var(--nb-muted);
+            font-size: .9rem;
+        }
+
+        input, textarea, [data-baseweb="select"] {
+            border-radius: 10px !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_brand_header():
+    logo_path = Path("logo.png")
+    st.markdown('<div class="nb-header">', unsafe_allow_html=True)
+
+    if logo_path.exists():
+        st.image(str(logo_path), use_container_width=True)
+    else:
+        st.markdown('<div class="nb-header-title">NORTE brunch</div>', unsafe_allow_html=True)
+
+    st.markdown(
+        '<div class="nb-header-subtitle">BIEN SERVIDAS · BIEN NORTEÑAS</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def big_red_amount(label, amount):
+    st.markdown(
+        f"""
+        <div class="nb-total-red">
+            <div class="label">{label}</div>
+            <div class="amount">{pesos(amount)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def big_green_amount(label, amount):
+    st.markdown(
+        f"""
+        <div class="nb-total-green">
+            <div class="label">{label}</div>
+            <div class="amount">{pesos(amount)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # -----------------------------
 # PRODUCTOS
 # -----------------------------
@@ -2322,6 +2558,7 @@ def main():
         st.session_state["authenticated"] = False
         st.rerun()
 
+    st.sidebar.markdown("### Norte Brunch")
     page = st.sidebar.radio(
         "Menú",
         [
