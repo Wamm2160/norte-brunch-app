@@ -915,6 +915,33 @@ def page_diezmo():
     st.dataframe(diezmos, use_container_width=True)
 
 
+
+# -----------------------------
+# SEGURIDAD / PASSWORD
+# -----------------------------
+
+def check_password():
+    """Protege la app con una contraseña guardada en Streamlit Secrets."""
+    if "app" not in st.secrets or "password" not in st.secrets["app"]:
+        st.error("Falta configurar la contraseña de la app en Streamlit Secrets.")
+        st.info('Agrega esto en Secrets:\n\n[app]\npassword = "TU_PASSWORD_AQUI"')
+        return False
+
+    if st.session_state.get("authenticated", False):
+        return True
+
+    st.subheader("Acceso privado")
+    password = st.text_input("Contraseña", type="password")
+
+    if st.button("Entrar"):
+        if password == st.secrets["app"]["password"]:
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("Contraseña incorrecta.")
+
+    return False
+
 # -----------------------------
 # MAIN APP
 # -----------------------------
@@ -923,6 +950,9 @@ def main():
     st.set_page_config(page_title=APP_TITLE, page_icon="🥪", layout="wide")
     st.title("🥪 Norte Brunch Finanzas")
 
+    if not check_password():
+        st.stop()
+
     try:
         setup_workbook()
     except Exception as error:
@@ -930,6 +960,10 @@ def main():
         st.write("Revisa que tus secrets estén configurados y que la hoja esté compartida con el service account.")
         st.exception(error)
         st.stop()
+
+    if st.sidebar.button("Cerrar sesión"):
+        st.session_state["authenticated"] = False
+        st.rerun()
 
     page = st.sidebar.radio(
         "Menú",
