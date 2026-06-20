@@ -3,6 +3,7 @@ import time
 import random
 from datetime import datetime, date, timedelta, time as dt_time
 from zoneinfo import ZoneInfo
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -14,6 +15,7 @@ APP_TITLE = "Norte Brunch Finanzas"
 TIMEZONE = ZoneInfo("America/Mexico_City")
 TITHING_RATE = 0.10
 CARD_FEE_RATE = 0.035
+MIN_INVESTMENT_REPAYMENT_ALERT = 10000
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -28,7 +30,7 @@ SHEETS = {
         "default_rows": [
             ["Torta de adobada", 95, 40, "si"],
             ["Torta de pierna", 100, 40, "si"],
-            ["Torta mixta", 110, 45, "si"],
+            ["Torta mixta", 125, 45, "si"],
             ["Pastel", 45, 15, "si"],
             ["Cafe", 20, 10, "si"],
             ["Refresco", 30, 10, "si"],
@@ -122,6 +124,36 @@ SHEETS = {
         "headers": ["insumo", "cantidad", "unidad"],
         "default_rows": [],
     },
+    "recetas": {
+        "name": "Recetas",
+        "headers": [
+            "producto",
+            "insumo",
+            "cantidad_por_producto",
+            "unidad",
+            "costo_unitario",
+            "activo",
+        ],
+        "default_rows": [
+            ["Torta de adobada", "pan", 1, "pieza", 8, "si"],
+            ["Torta de adobada", "carne adobada", 0.15, "kg", 95, "si"],
+            ["Torta de adobada", "aguacate", 0.08, "kg", 60, "si"],
+            ["Torta de pierna", "pan", 1, "pieza", 8, "si"],
+            ["Torta de pierna", "pierna", 0.15, "kg", 95, "si"],
+            ["Torta de pierna", "aguacate", 0.08, "kg", 60, "si"],
+            ["Torta mixta", "pan", 1, "pieza", 8, "si"],
+            ["Torta mixta", "carne adobada", 0.075, "kg", 95, "si"],
+            ["Torta mixta", "pierna", 0.075, "kg", 95, "si"],
+            ["Torta mixta", "aguacate", 0.08, "kg", 60, "si"],
+            ["Pastel", "rebanada de pastel", 1, "pieza", 27, "si"],
+            ["Cafe", "cafe preparado", 1, "pieza", 10, "si"],
+            ["Refresco", "refresco 600 ml", 1, "pieza", 20, "si"],
+            ["Agua de litro", "agua 1 litro", 1, "pieza", 20, "si"],
+            ["Agua de medio litro", "agua 500 ml", 1, "pieza", 10, "si"],
+            ["Extra aguacate", "aguacate", 0.08, "kg", 60, "si"],
+            ["Extra queso", "queso", 0.04, "kg", 120, "si"],
+        ],
+    },
     "saldos": {
         "name": "Saldos",
         "headers": ["cuenta", "monto"],
@@ -172,8 +204,15 @@ SHEETS = {
     "config": {
         "name": "Config",
         "headers": ["clave", "valor"],
-        "default_rows": [["frecuencia_diezmo", "mensual"]],
+        "default_rows": [["frecuencia_diezmo", "mensual"], ["frecuencia_pago_personal", "semanal"]],
     },
+}
+
+
+REQUIRED_PRODUCT_PRICES = {
+    "Torta mixta": {"precio": 125, "ganancia_personal": 45},
+    "Agua de litro": {"precio": 45, "ganancia_personal": 25},
+    "Agua de medio litro": {"precio": 30, "ganancia_personal": 20},
 }
 
 
@@ -310,6 +349,42 @@ def replace_records(sheet_key, records):
     clear_data_cache()
 
 
+@st.cache_resource
+def ensure_required_product_prices():
+    """Actualiza precios clave que ya definió Wilson, sin tocar otros productos."""
+    df = load_df("productos")
+    if df.empty:
+        return False
+
+    changed = False
+    records = []
+
+    for _, row in df.iterrows():
+        product = str(row.get("producto", "")).strip()
+        record = {
+            "producto": row.get("producto", ""),
+            "precio": row.get("precio", 0),
+            "ganancia_personal": row.get("ganancia_personal", 0),
+            "activo": row.get("activo", "si"),
+        }
+
+        if product in REQUIRED_PRODUCT_PRICES:
+            expected = REQUIRED_PRODUCT_PRICES[product]
+            if to_float(record["precio"]) != float(expected["precio"]):
+                record["precio"] = expected["precio"]
+                changed = True
+            if to_float(record["ganancia_personal"]) != float(expected["ganancia_personal"]):
+                record["ganancia_personal"] = expected["ganancia_personal"]
+                changed = True
+
+        records.append(record)
+
+    if changed:
+        replace_records("productos", records)
+
+    return changed
+
+
 # -----------------------------
 # UTILIDADES
 # -----------------------------
@@ -346,6 +421,121 @@ def pesos(value):
         return f"${float(value):,.2f}"
     except (TypeError, ValueError):
         return "$0.00"
+
+
+def apply_branding():
+    st.markdown(
+        """
+        <style>
+        :root {
+            --nb-red: #b42318;
+            --nb-dark: #2b1b12;
+            --nb-cream: #fff4df;
+            --nb-gold: #d8952f;
+            --nb-green: #157347;
+        }
+
+        .stApp {
+            background: linear-gradient(180deg, #fff8ea 0%, #fff4df 45%, #ffffff 100%);
+        }
+
+        .nb-hero {
+            background: linear-gradient(135deg, #2b1b12 0%, #5a2b18 55%, #b42318 100%);
+            border-radius: 22px;
+            padding: 22px 24px;
+            margin-bottom: 18px;
+            box-shadow: 0 8px 22px rgba(43, 27, 18, 0.18);
+            color: white;
+            border: 2px solid #d8952f;
+        }
+
+        .nb-title {
+            font-size: 2.2rem;
+            font-weight: 900;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+        }
+
+        .nb-subtitle {
+            font-size: 1rem;
+            color: #ffe8b8;
+        }
+
+        .nb-total-red {
+            background: #fff1f0;
+            border: 3px solid #b42318;
+            color: #b42318;
+            border-radius: 18px;
+            padding: 18px;
+            text-align: center;
+            font-weight: 900;
+            font-size: 2.35rem;
+            margin: 14px 0;
+            box-shadow: 0 5px 14px rgba(180, 35, 24, 0.18);
+        }
+
+        .nb-total-green {
+            background: #eafaf1;
+            border: 3px solid #157347;
+            color: #157347;
+            border-radius: 18px;
+            padding: 18px;
+            text-align: center;
+            font-weight: 900;
+            font-size: 2.15rem;
+            margin: 14px 0;
+            box-shadow: 0 5px 14px rgba(21, 115, 71, 0.16);
+        }
+
+        .nb-warning-card {
+            background: #fff7e6;
+            border-left: 8px solid #d8952f;
+            border-radius: 14px;
+            padding: 16px;
+            margin: 12px 0;
+        }
+
+        div.stButton > button {
+            border-radius: 14px;
+            font-weight: 700;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_brand_header():
+    logo_path = Path("logo.png")
+
+    st.markdown(
+        """
+        <div class="nb-hero">
+            <div class="nb-title">🥪 Norte Brunch</div>
+            <div class="nb-subtitle">Sistema privado de ventas, gastos, pagos y recuperación de inversión</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if logo_path.exists():
+        st.image(str(logo_path), width=140)
+    elif "app" in st.secrets and "logo_url" in st.secrets["app"]:
+        st.image(st.secrets["app"]["logo_url"], width=140)
+
+
+def big_red_amount(label, amount):
+    st.markdown(
+        f'<div class="nb-total-red">{label}<br>{pesos(amount)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def big_green_amount(label, amount):
+    st.markdown(
+        f'<div class="nb-total-green">{label}<br>{pesos(amount)}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def to_float(value, default=0.0):
@@ -488,6 +678,144 @@ def set_config_value(key, value):
         records.append({"clave": key, "valor": value})
 
     replace_records("config", records)
+
+
+
+def get_next_personal_payment_date(frequency, today=None):
+    today = today or mx_now().date()
+    frequency = str(frequency).lower().strip()
+
+    if frequency == "semanal":
+        # Domingo como cierre semanal.
+        days_until_sunday = (6 - today.weekday()) % 7
+        return today + timedelta(days=days_until_sunday)
+
+    if frequency == "quincenal":
+        if today.day <= 15:
+            return today.replace(day=15)
+        next_month = today.replace(day=28) + timedelta(days=4)
+        last_day = next_month - timedelta(days=next_month.day)
+        return last_day
+
+    # Mensual: último día del mes.
+    next_month = today.replace(day=28) + timedelta(days=4)
+    last_day = next_month - timedelta(days=next_month.day)
+    return last_day
+
+
+def record_family_income_from_norte(fecha, producto, amount, nota):
+    append_record("gastos_familiares", {
+        **fecha,
+        "tipo": "ingreso",
+        "categoria": "pago de Norte Brunch",
+        "producto": producto,
+        "monto": amount,
+        "metodo_pago": "Norte Brunch",
+        "nota": nota,
+    })
+
+
+def claim_personal_profit(fecha):
+    saldos = get_saldos()
+    amount = round(float(saldos["ganancia_pendiente_personal"]), 2)
+
+    if amount <= 0:
+        st.error("No hay ganancia pendiente para pagarte.")
+        return
+
+    if amount > saldos["dinero_norte_brunch"]:
+        st.error("Norte Brunch no tiene suficiente dinero para pagarte toda la ganancia pendiente.")
+        return
+
+    change_saldo(saldos, "dinero_norte_brunch", -amount)
+    change_saldo(saldos, "ganancia_pendiente_personal", -amount)
+    change_saldo(saldos, "ganancia_pagada_personal", amount)
+    change_saldo(saldos, "dinero_familiar", amount)
+    change_saldo(saldos, "ingresos_familiares_totales", amount)
+    save_saldos(saldos)
+
+    record_family_income_from_norte(
+        fecha,
+        "Pago de ganancia personal",
+        amount,
+        "Pago automático de ganancia personal de Norte Brunch",
+    )
+
+    big_green_amount("Pago personal realizado", amount)
+    st.success("Se registró automáticamente como ingreso familiar.")
+
+
+def calculate_investment_repayment_status(saldos):
+    available = round(
+        float(saldos["dinero_norte_brunch"]) - float(saldos["ganancia_pendiente_personal"]),
+        2,
+    )
+    debt = round(float(saldos["deuda_inversion_personal"]), 2)
+
+    if debt <= 0:
+        return {
+            "available": available,
+            "debt": debt,
+            "can_pay": False,
+            "suggested_payment": 0,
+            "message": "Norte Brunch no tiene deuda pendiente contigo.",
+        }
+
+    if available >= MIN_INVESTMENT_REPAYMENT_ALERT or (available >= debt and debt > 0):
+        suggested = min(debt, available, MIN_INVESTMENT_REPAYMENT_ALERT if debt >= MIN_INVESTMENT_REPAYMENT_ALERT else debt)
+        return {
+            "available": available,
+            "debt": debt,
+            "can_pay": suggested > 0,
+            "suggested_payment": round(suggested, 2),
+            "message": "Norte Brunch ya tiene dinero disponible para abonarte a tu inversión.",
+        }
+
+    return {
+        "available": available,
+        "debt": debt,
+        "can_pay": False,
+        "suggested_payment": 0,
+        "message": f"Aún no hay $10,000 libres para abonarte. Disponible estimado: {pesos(available)}.",
+    }
+
+
+def repay_investment_suggested(fecha):
+    saldos = get_saldos()
+    status = calculate_investment_repayment_status(saldos)
+    amount = status["suggested_payment"]
+
+    if amount <= 0:
+        st.error("Aún no hay pago sugerido para recuperar inversión.")
+        return
+
+    if amount > saldos["dinero_norte_brunch"]:
+        st.error("Norte Brunch no tiene suficiente dinero.")
+        return
+
+    change_saldo(saldos, "dinero_norte_brunch", -amount)
+    change_saldo(saldos, "deuda_inversion_personal", -amount)
+    change_saldo(saldos, "inversion_pagada_personal", amount)
+    change_saldo(saldos, "dinero_familiar", amount)
+    change_saldo(saldos, "ingresos_familiares_totales", amount)
+    save_saldos(saldos)
+
+    append_record("inversiones", {
+        **fecha,
+        "tipo": "pago_inversion",
+        "monto": amount,
+        "nota": "Abono automático sugerido para recuperar inversión",
+    })
+
+    record_family_income_from_norte(
+        fecha,
+        "Recuperación de inversión",
+        amount,
+        "Abono de Norte Brunch para recuperar inversión personal",
+    )
+
+    big_green_amount("Abono de inversión recuperado", amount)
+    st.success("Se registró automáticamente como ingreso familiar.")
 
 
 def load_categories(sheet_key):
@@ -924,8 +1252,9 @@ def pay_pending_order(pedido_id, payment_date, method, amounts, note):
     change_saldo(saldos, "diezmo_pendiente", tithing)
     save_saldos(saldos)
 
+    big_green_amount("PEDIDO PAGADO", amounts["net_received"])
     st.success(
-        f"Pedido pagado. Total: {pesos(total)} | Comisión terminal: {pesos(amounts['terminal_fee'])} | Neto recibido: {pesos(amounts['net_received'])}"
+        f"Pedido pagado. Total bruto: {pesos(total)} | Comisión terminal: {pesos(amounts['terminal_fee'])} | Neto recibido: {pesos(amounts['net_received'])}"
     )
     st.rerun()
 
@@ -942,11 +1271,12 @@ def render_current_cart(products):
 
     totals = calculate_cart_totals(st.session_state.cart)
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total", pesos(totals["total"]))
-    c2.metric("Ganancia", pesos(totals["profit"]))
-    c3.metric("Diezmo", pesos(totals["tithing"]))
-    c4.metric("Para Norte", pesos(totals["norte"]))
+    big_red_amount("TOTAL A COBRAR", totals["total"])
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Ganancia", pesos(totals["profit"]))
+    c2.metric("Diezmo", pesos(totals["tithing"]))
+    c3.metric("Para Norte", pesos(totals["norte"]))
 
     st.write("**Quitar producto antes de crear el pedido**")
     labels = [
@@ -1025,10 +1355,11 @@ def render_pending_orders(products):
     profit = round(lines_df["ganancia_personal_linea"].sum(), 2)
     tithing = round(lines_df["diezmo_linea"].sum(), 2)
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total del pedido", pesos(total))
-    c2.metric("Ganancia personal", pesos(profit))
-    c3.metric("Diezmo", pesos(tithing))
+    big_red_amount("TOTAL A COBRAR", total)
+
+    c1, c2 = st.columns(2)
+    c1.metric("Ganancia personal", pesos(profit))
+    c2.metric("Diezmo", pesos(tithing))
 
     with st.expander("Modificar pedido pendiente"):
         st.write("**Agregar producto**")
@@ -1076,6 +1407,8 @@ def render_pending_orders(products):
 
     st.divider()
     st.subheader("Cobrar pedido")
+
+    big_red_amount("TOTAL PENDIENTE DE PAGO", total)
 
     payment_date = datetime_inputs(f"pago_{pedido_id}", "Fecha y hora de pago")
     method = st.radio(
@@ -1314,11 +1647,11 @@ def page_finanzas_familiares():
     tab1, tab2 = st.tabs(["Registrar movimiento", "Reporte"])
 
     with tab1:
-        st.caption("Los gastos familiares se guardan en la categoría Hogar. El detalle se controla por producto.")
+        st.caption("Gastos familiares: categoría Hogar. Ingresos manuales: solo Otros ingresos. Los pagos de Norte Brunch se registran automáticamente cuando te pagas.")
 
         with st.form("movimiento_familiar_form"):
             fecha = datetime_inputs("familia", "Fecha y hora del movimiento")
-            tipo = st.radio("Tipo", ["ingreso", "gasto"], horizontal=True)
+            tipo = st.radio("Tipo", ["gasto", "ingreso"], horizontal=True)
 
             if tipo == "gasto":
                 categoria = "hogar"
@@ -1330,11 +1663,11 @@ def page_finanzas_familiares():
                     placeholder="Ej. leche, despensa, pañales, gas, internet",
                 )
             else:
-                categoria = st.selectbox("Tipo de ingreso", ["ingreso general", "pago de Norte Brunch", "otros"])
-                producto = st.text_input("Origen del ingreso", value=categoria)
+                categoria = "otros ingresos"
+                producto = st.text_input("Origen del ingreso", value="Otros ingresos")
 
             monto = st.number_input("Monto", min_value=0.0, step=50.0)
-            metodo_pago = st.selectbox("Método / origen", ["Efectivo", "Tarjeta", "Transferencia", "Norte Brunch", "Otro"])
+            metodo_pago = st.selectbox("Método / origen", ["Efectivo", "Tarjeta", "Transferencia", "Otro"])
             nota = st.text_input("Nota")
             guardar = st.form_submit_button("Guardar movimiento")
 
@@ -1343,7 +1676,7 @@ def page_finanzas_familiares():
                 st.error("El monto debe ser mayor que cero.")
                 return
             if not producto.strip():
-                st.error("Escribe el producto o gasto.")
+                st.error("Escribe el producto, gasto u origen.")
                 return
 
             append_record("gastos_familiares", {
@@ -1558,6 +1891,242 @@ def page_corte_caja():
 
 
 # -----------------------------
+# PLANEACIÓN DE COMPRAS / REINVERSIÓN
+# -----------------------------
+
+def get_sales_for_days(days):
+    today = mx_now().date()
+    start = today - timedelta(days=days - 1)
+    ventas = filter_date_range(load_df("ventas"), start, today)
+    ventas = to_numeric(ventas, ["cantidad", "total_linea"])
+    return ventas, start, today
+
+
+def get_recipe_df():
+    recetas = load_df("recetas")
+    if recetas.empty:
+        return recetas
+
+    recetas = to_numeric(recetas, ["cantidad_por_producto", "costo_unitario"])
+    recetas["activo"] = recetas["activo"].astype(str).str.lower().replace("", "si")
+    recetas = recetas[recetas["activo"] != "no"].copy()
+    return recetas
+
+
+def get_inventory_lookup():
+    inventario = load_df("inventario")
+    lookup = {}
+
+    if inventario.empty:
+        return lookup
+
+    inventario = to_numeric(inventario, ["cantidad"])
+
+    for _, row in inventario.iterrows():
+        insumo = str(row.get("insumo", "")).strip().lower()
+        unidad = str(row.get("unidad", "")).strip().lower()
+        key = (insumo, unidad)
+        lookup[key] = lookup.get(key, 0) + to_float(row.get("cantidad", 0))
+
+    return lookup
+
+
+def build_shopping_forecast(ventas, days_analyzed, projection_days, safety_margin):
+    active_products = load_active_products()
+    recetas = get_recipe_df()
+
+    if active_products.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), "No hay productos activos."
+
+    product_names = active_products["producto"].tolist()
+
+    if ventas.empty:
+        sold_summary = pd.DataFrame({
+            "producto": product_names,
+            "cantidad_vendida": [0 for _ in product_names],
+            "venta_total": [0 for _ in product_names],
+            "promedio_diario": [0 for _ in product_names],
+            "proyección_unidades": [0 for _ in product_names],
+            "estado": ["Sin ventas en el periodo" for _ in product_names],
+        })
+        return sold_summary, pd.DataFrame(), recetas, "No hay ventas pagadas en el periodo elegido."
+
+    by_product = ventas.groupby("producto").agg({
+        "cantidad": "sum",
+        "total_linea": "sum",
+    }).reset_index()
+
+    records = []
+    for product in product_names:
+        match = by_product[by_product["producto"] == product]
+        if match.empty:
+            qty = 0
+            total = 0
+        else:
+            qty = to_float(match.iloc[0]["cantidad"])
+            total = to_float(match.iloc[0]["total_linea"])
+
+        daily_avg = qty / max(days_analyzed, 1)
+        projected_units = daily_avg * projection_days * (1 + safety_margin)
+
+        if qty == 0:
+            status = "No se vendió"
+        elif daily_avg >= 5:
+            status = "Se mueve bien"
+        elif daily_avg >= 1:
+            status = "Se mueve poco"
+        else:
+            status = "Muy lento"
+
+        records.append({
+            "producto": product,
+            "cantidad_vendida": round(qty, 2),
+            "venta_total": round(total, 2),
+            "promedio_diario": round(daily_avg, 2),
+            "proyección_unidades": round(projected_units, 2),
+            "estado": status,
+        })
+
+    sold_summary = pd.DataFrame(records)
+
+    if recetas.empty:
+        return sold_summary, pd.DataFrame(), recetas, "Falta configurar la hoja Recetas."
+
+    inventory = get_inventory_lookup()
+    shopping = []
+
+    for _, product_row in sold_summary.iterrows():
+        product = product_row["producto"]
+        projected_units = to_float(product_row["proyección_unidades"])
+        recipe_lines = recetas[recetas["producto"] == product]
+
+        for _, recipe in recipe_lines.iterrows():
+            insumo = str(recipe.get("insumo", "")).strip()
+            unidad = str(recipe.get("unidad", "")).strip()
+            cantidad_por_producto = to_float(recipe.get("cantidad_por_producto", 0))
+            costo_unitario = to_float(recipe.get("costo_unitario", 0))
+
+            required_qty = projected_units * cantidad_por_producto
+            current_qty = inventory.get((insumo.lower(), unidad.lower()), 0)
+            buy_qty = max(required_qty - current_qty, 0)
+            estimated_cost = buy_qty * costo_unitario
+
+            shopping.append({
+                "producto_origen": product,
+                "insumo": insumo,
+                "unidad": unidad,
+                "cantidad_requerida": round(required_qty, 3),
+                "inventario_actual": round(current_qty, 3),
+                "cantidad_a_comprar": round(buy_qty, 3),
+                "costo_unitario": round(costo_unitario, 2),
+                "costo_estimado": round(estimated_cost, 2),
+            })
+
+    shopping_df = pd.DataFrame(shopping)
+
+    if not shopping_df.empty:
+        shopping_summary = shopping_df.groupby(["insumo", "unidad"]).agg({
+            "cantidad_requerida": "sum",
+            "inventario_actual": "max",
+            "cantidad_a_comprar": "sum",
+            "costo_estimado": "sum",
+        }).reset_index()
+        shopping_summary["cantidad_requerida"] = shopping_summary["cantidad_requerida"].round(3)
+        shopping_summary["cantidad_a_comprar"] = shopping_summary["cantidad_a_comprar"].round(3)
+        shopping_summary["costo_estimado"] = shopping_summary["costo_estimado"].round(2)
+    else:
+        shopping_summary = pd.DataFrame()
+
+    return sold_summary, shopping_summary, recetas, ""
+
+
+def page_planeacion_compras():
+    st.header("Planeación de compras y reinversión")
+    st.caption("La app analiza ventas pagadas, productos que se mueven o no, y calcula cuánto comprar para la siguiente semana.")
+
+    col1, col2, col3 = st.columns(3)
+    days_analyzed = col1.number_input("Días a analizar", min_value=1, max_value=90, value=14, step=1)
+    projection_days = col2.number_input("Días a proyectar", min_value=1, max_value=30, value=7, step=1)
+    margin_pct = col3.number_input("Margen extra de seguridad (%)", min_value=0, max_value=100, value=15, step=5)
+
+    ventas, start, end = get_sales_for_days(int(days_analyzed))
+    sold_summary, shopping_summary, recetas, message = build_shopping_forecast(
+        ventas,
+        int(days_analyzed),
+        int(projection_days),
+        float(margin_pct) / 100,
+    )
+
+    st.info(f"Periodo analizado: {start.strftime('%Y-%m-%d')} a {end.strftime('%Y-%m-%d')}. Proyección: próximos {int(projection_days)} días.")
+
+    if message:
+        st.warning(message)
+
+    if not sold_summary.empty:
+        st.subheader("Qué se vende y qué no")
+        st.dataframe(sold_summary, use_container_width=True)
+
+        not_sold = sold_summary[sold_summary["cantidad_vendida"] <= 0]
+        slow = sold_summary[sold_summary["estado"].isin(["Muy lento", "Se mueve poco"])]
+
+        if not not_sold.empty:
+            st.warning("Productos sin venta en el periodo: " + ", ".join(not_sold["producto"].tolist()))
+        if not slow.empty:
+            st.info("Productos lentos o con baja venta: " + ", ".join(slow["producto"].tolist()))
+
+    if not shopping_summary.empty:
+        total_to_spend = shopping_summary["costo_estimado"].sum()
+
+        st.subheader("Lista estimada de compras")
+        st.dataframe(shopping_summary, use_container_width=True)
+        big_red_amount("Dinero estimado para reinvertir en compras", total_to_spend)
+
+        st.subheader("Lectura rápida")
+        for _, row in shopping_summary.iterrows():
+            qty = to_float(row["cantidad_a_comprar"])
+            if qty > 0:
+                st.write(
+                    f"- Comprar **{qty:g} {row['unidad']}** de **{row['insumo']}** "
+                    f"≈ **{pesos(row['costo_estimado'])}**"
+                )
+    else:
+        st.info("Todavía no hay lista de compras porque faltan ventas o recetas.")
+
+    st.divider()
+    st.subheader("Configurar recetas e insumos")
+    st.caption("Edita aquí cuánto insumo usa cada producto y cuánto cuesta cada unidad. Esto alimenta la planeación.")
+
+    with st.expander("Ver recetas actuales"):
+        st.dataframe(recetas, use_container_width=True)
+
+    with st.form("receta_form"):
+        productos = load_active_products()["producto"].tolist()
+        producto = st.selectbox("Producto vendido", productos)
+        insumo = st.text_input("Insumo", placeholder="Ej. carne adobada, aguacate, pan")
+        cantidad = st.number_input("Cantidad usada por producto", min_value=0.0, step=0.01, format="%.3f")
+        unidad = st.selectbox("Unidad", ["kg", "pieza", "litro", "paquete", "otro"])
+        costo_unitario = st.number_input("Costo por unidad", min_value=0.0, step=1.0)
+        activo = st.selectbox("Activo", ["si", "no"])
+        guardar = st.form_submit_button("Agregar receta/insumo")
+
+    if guardar:
+        if not insumo.strip() or cantidad <= 0:
+            st.error("Falta insumo o cantidad.")
+            return
+
+        append_record("recetas", {
+            "producto": producto,
+            "insumo": insumo.strip().lower(),
+            "cantidad_por_producto": cantidad,
+            "unidad": unidad,
+            "costo_unitario": costo_unitario,
+            "activo": activo,
+        })
+        st.success("Receta agregada.")
+        st.rerun()
+
+
+# -----------------------------
 # SALDOS, INVERSIONES Y DIEZMO
 # -----------------------------
 
@@ -1565,134 +2134,98 @@ def page_saldos_local():
     st.header("Saldos del local")
 
     saldos = get_saldos()
-    disponible = (
-        saldos["dinero_norte_brunch"]
-        - saldos["ganancia_pendiente_personal"]
-        - saldos["deuda_inversion_personal"]
-    )
+    disponible_deuda = float(saldos["dinero_norte_brunch"]) - float(saldos["ganancia_pendiente_personal"])
+    status = calculate_investment_repayment_status(saldos)
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Dinero Norte Brunch", pesos(saldos["dinero_norte_brunch"]))
     c2.metric("Ganancia pendiente para mí", pesos(saldos["ganancia_pendiente_personal"]))
-    c3.metric("Deuda inversión hacia mí", pesos(saldos["deuda_inversion_personal"]))
+    c3.metric("Deuda de Norte Brunch hacia mí", pesos(saldos["deuda_inversion_personal"]))
 
     c4, c5, c6 = st.columns(3)
     c4.metric("Ganancia pagada", pesos(saldos["ganancia_pagada_personal"]))
-    c5.metric("Inversión total", pesos(saldos["inversion_personal_total"]))
-    c6.metric("Dinero libre real", pesos(disponible))
+    c5.metric("Inversión recuperada", pesos(saldos["inversion_pagada_personal"]))
+    c6.metric("Disponible para deuda", pesos(disponible_deuda))
 
-    st.divider()
-    st.subheader("Registrar movimiento")
+    st.info("La deuda hacia ti se genera automáticamente cuando pagas gastos de Norte Brunch con dinero personal/familiar.")
 
-    action = st.selectbox(
-        "Movimiento",
-        [
-            "Pagarme ganancia personal",
-            "Registrar inversión inicial",
-            "Registrar inversión extra",
-            "Pagarme deuda de inversión",
-            "Ajustar dinero de Norte Brunch",
-        ],
+    if status["debt"] <= 0:
+        st.success("Norte Brunch no tiene deuda pendiente contigo.")
+    elif status["can_pay"]:
+        st.markdown(
+            f"""
+            <div class="nb-warning-card">
+                <b>Ya hay pago para recuperar inversión.</b><br>
+                Disponible estimado después de apartar tu ganancia: <b>{pesos(status['available'])}</b><br>
+                Deuda pendiente: <b>{pesos(status['debt'])}</b><br>
+                Abono sugerido: <b>{pesos(status['suggested_payment'])}</b>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.warning(status["message"])
+
+
+def page_pago_personal():
+    st.header("Pago personal")
+
+    saldos = get_saldos()
+    frecuencia_actual = get_config_value("frecuencia_pago_personal", "semanal")
+    opciones = ["semanal", "quincenal", "mensual"]
+
+    st.subheader("Frecuencia de pago")
+    nueva_frecuencia = st.selectbox(
+        "Elige cada cuándo quieres pagarte",
+        opciones,
+        index=opciones.index(frecuencia_actual) if frecuencia_actual in opciones else 0,
     )
 
-    fecha = datetime_inputs("mov_local", "Fecha y hora del movimiento")
-    amount = st.number_input("Monto", min_value=0.0, step=50.0)
-    note = st.text_input("Nota")
-
-    if st.button("Guardar movimiento", type="primary"):
-        if amount <= 0:
-            st.error("El monto debe ser mayor que cero.")
-            return
-
-        saldos = get_saldos()
-
-        if action == "Pagarme ganancia personal":
-            if amount > saldos["ganancia_pendiente_personal"]:
-                st.error("No hay suficiente ganancia pendiente.")
-                return
-            if amount > saldos["dinero_norte_brunch"]:
-                st.error("Norte Brunch no tiene suficiente dinero.")
-                return
-
-            change_saldo(saldos, "dinero_norte_brunch", -amount)
-            change_saldo(saldos, "ganancia_pendiente_personal", -amount)
-            change_saldo(saldos, "ganancia_pagada_personal", amount)
-            change_saldo(saldos, "dinero_familiar", amount)
-            change_saldo(saldos, "ingresos_familiares_totales", amount)
-
-            append_record("gastos_familiares", {
-                **fecha,
-                "tipo": "ingreso",
-                "categoria": "pago de Norte Brunch",
-                "producto": "Pago de ganancia personal",
-                "monto": amount,
-                "metodo_pago": "Norte Brunch",
-                "nota": "Pago de ganancia personal",
-            })
-            st.success("Ganancia pagada. El diezmo ya se calculó al registrar ventas.")
-
-        elif action == "Registrar inversión inicial":
-            change_saldo(saldos, "dinero_norte_brunch", amount)
-            change_saldo(saldos, "inversion_inicial_personal", amount)
-            change_saldo(saldos, "inversion_personal_total", amount)
-            change_saldo(saldos, "deuda_inversion_personal", amount)
-            change_saldo(saldos, "dinero_familiar", -amount)
-            change_saldo(saldos, "gastos_familiares_totales", amount)
-
-            append_record("inversiones", {**fecha, "tipo": "inversion_inicial", "monto": amount, "nota": note})
-            append_record("gastos_familiares", {
-                **fecha,
-                "tipo": "gasto",
-                "categoria": "hogar",
-                "producto": "Inversión inicial en Norte Brunch",
-                "monto": amount,
-                "metodo_pago": "Personal/Familiar",
-                "nota": "Inversión inicial en Norte Brunch",
-            })
-            st.success("Inversión inicial registrada.")
-
-        elif action == "Registrar inversión extra":
-            change_saldo(saldos, "dinero_norte_brunch", amount)
-            change_saldo(saldos, "inversion_personal_total", amount)
-            change_saldo(saldos, "deuda_inversion_personal", amount)
-            change_saldo(saldos, "dinero_familiar", -amount)
-            change_saldo(saldos, "gastos_familiares_totales", amount)
-
-            append_record("inversiones", {**fecha, "tipo": "inversion_extra", "monto": amount, "nota": note})
-            st.success("Inversión extra registrada.")
-
-        elif action == "Pagarme deuda de inversión":
-            if amount > saldos["deuda_inversion_personal"]:
-                st.error("Norte Brunch no debe tanto de inversión.")
-                return
-            if amount > saldos["dinero_norte_brunch"]:
-                st.error("Norte Brunch no tiene suficiente dinero.")
-                return
-
-            change_saldo(saldos, "dinero_norte_brunch", -amount)
-            change_saldo(saldos, "deuda_inversion_personal", -amount)
-            change_saldo(saldos, "inversion_pagada_personal", amount)
-            change_saldo(saldos, "dinero_familiar", amount)
-            change_saldo(saldos, "ingresos_familiares_totales", amount)
-
-            append_record("inversiones", {**fecha, "tipo": "pago_inversion", "monto": amount, "nota": note})
-            append_record("gastos_familiares", {
-                **fecha,
-                "tipo": "ingreso",
-                "categoria": "pago de Norte Brunch",
-                "producto": "Pago de deuda de inversión",
-                "monto": amount,
-                "metodo_pago": "Norte Brunch",
-                "nota": "Pago de deuda de inversión",
-            })
-            st.success("Pago de inversión registrado.")
-
-        elif action == "Ajustar dinero de Norte Brunch":
-            change_saldo(saldos, "dinero_norte_brunch", amount)
-            st.success("Saldo ajustado.")
-
-        save_saldos(saldos)
+    if st.button("Guardar frecuencia de pago"):
+        set_config_value("frecuencia_pago_personal", nueva_frecuencia)
+        st.success("Frecuencia guardada.")
         st.rerun()
+
+    next_date = get_next_personal_payment_date(nueva_frecuencia)
+    pending = float(saldos["ganancia_pendiente_personal"])
+
+    st.divider()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Tu pago acumulado", pesos(pending))
+    c2.metric("Próxima fecha sugerida", next_date.strftime("%Y-%m-%d"))
+    c3.metric("Dinero Norte Brunch", pesos(saldos["dinero_norte_brunch"]))
+
+    if pending > 0:
+        big_green_amount("Pago personal disponible", pending)
+    else:
+        st.info("Todavía no hay ganancia pendiente para pagarte.")
+
+    fecha = datetime_inputs("pago_personal", "Fecha y hora del pago personal")
+
+    if st.button("Reclamar mi pago completo", type="primary"):
+        claim_personal_profit(fecha)
+        st.rerun()
+
+    st.divider()
+    st.subheader("Recuperación de inversión")
+
+    status = calculate_investment_repayment_status(get_saldos())
+    st.write(status["message"])
+
+    if status["debt"] > 0:
+        c4, c5, c6 = st.columns(3)
+        c4.metric("Deuda pendiente", pesos(status["debt"]))
+        c5.metric("Disponible estimado", pesos(status["available"]))
+        c6.metric("Abono sugerido", pesos(status["suggested_payment"]))
+
+    fecha_inv = datetime_inputs("abono_inversion", "Fecha y hora del abono de inversión")
+
+    if status["can_pay"]:
+        if st.button("Registrar abono sugerido para recuperar inversión", type="primary"):
+            repay_investment_suggested(fecha_inv)
+            st.rerun()
+    else:
+        st.info("El botón de recuperación aparecerá cuando haya al menos $10,000 disponibles o cuando la deuda final sea menor y ya pueda cubrirse.")
 
 
 def page_diezmo():
@@ -1769,7 +2302,8 @@ def page_diezmo():
 
 def main():
     st.set_page_config(page_title=APP_TITLE, page_icon="🥪", layout="wide")
-    st.title("🥪 Norte Brunch Finanzas")
+    apply_branding()
+    render_brand_header()
     st.caption("Zona horaria: México / America/Mexico_City")
 
     if not check_password():
@@ -1777,6 +2311,7 @@ def main():
 
     try:
         setup_workbook()
+        ensure_required_product_prices()
     except Exception as error:
         st.error("No se pudo conectar con Google Sheets.")
         st.write("Revisa tus secrets, el permiso del service account y la cuota de Google Sheets.")
@@ -1793,7 +2328,9 @@ def main():
             "Registrar pedido",
             "Corte de caja",
             "Reportes del local",
+            "Planeación de compras",
             "Saldos del local",
+            "Pago personal",
             "Gastos e inventario",
             "Finanzas familiares",
             "Diezmo",
@@ -1807,8 +2344,12 @@ def main():
         page_corte_caja()
     elif page == "Reportes del local":
         page_reportes_local()
+    elif page == "Planeación de compras":
+        page_planeacion_compras()
     elif page == "Saldos del local":
         page_saldos_local()
+    elif page == "Pago personal":
+        page_pago_personal()
     elif page == "Gastos e inventario":
         page_gastos_inventario()
     elif page == "Finanzas familiares":
