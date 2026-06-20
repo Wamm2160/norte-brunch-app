@@ -1,4 +1,6 @@
 import uuid
+import time
+import random
 from datetime import datetime, date, timedelta
 
 import pandas as pd
@@ -133,35 +135,70 @@ def get_spreadsheet():
     return client.open_by_key(st.secrets["google_sheet"]["spreadsheet_id"])
 
 
+def google_call(func, *args, **kwargs):
+    """Ejecuta llamadas a Google Sheets con reintento si aparece error 429."""
+    delay = 1
+
+    for attempt in range(5):
+        try:
+            return func(*args, **kwargs)
+        except gspread.exceptions.APIError as error:
+            message = str(error)
+            if "429" in message and attempt < 4:
+                time.sleep(delay + random.random())
+                delay *= 2
+            else:
+                raise
+
+
+@st.cache_resource
+def get_worksheet_map():
+    """Lee una sola vez la lista de hojas y la guarda en cache."""
+    spreadsheet = get_spreadsheet()
+    worksheets = google_call(spreadsheet.worksheets)
+    return {ws.title: ws for ws in worksheets}
+
+
 def get_ws(sheet_key):
     spreadsheet = get_spreadsheet()
     sheet_info = SHEETS[sheet_key]
     name = sheet_info["name"]
+    worksheet_map = get_worksheet_map()
 
-    try:
-        worksheet = spreadsheet.worksheet(name)
-    except gspread.WorksheetNotFound:
-        worksheet = spreadsheet.add_worksheet(title=name, rows=1000, cols=30)
+    worksheet = worksheet_map.get(name)
 
-    values = worksheet.get_all_values()
-
-    if not values:
-        worksheet.append_row(sheet_info["headers"])
-        for row in sheet_info["default_rows"]:
-            worksheet.append_row(row)
-    elif values[0] != sheet_info["headers"]:
-        # Si la hoja existe pero no tiene encabezados correctos, no borramos datos.
-        # Solo avisamos para evitar perdida accidental.
-        st.warning(
-            f"La hoja {name} existe, pero sus encabezados no coinciden con la app."
+    if worksheet is None:
+        worksheet = google_call(
+            spreadsheet.add_worksheet,
+            title=name,
+            rows=1000,
+            cols=max(30, len(sheet_info["headers"]) + 5),
         )
+        worksheet_map[name] = worksheet
+        google_call(worksheet.append_row, sheet_info["headers"], value_input_option="USER_ENTERED")
+        if sheet_info["default_rows"]:
+            google_call(worksheet.append_rows, sheet_info["default_rows"], value_input_option="USER_ENTERED")
 
     return worksheet
 
 
+@st.cache_resource
 def setup_workbook():
-    for key in SHEETS:
-        get_ws(key)
+    """Crea hojas faltantes y encabezados solo una vez por reinicio de la app."""
+    for key, sheet_info in SHEETS.items():
+        worksheet = get_ws(key)
+        first_row = google_call(worksheet.row_values, 1)
+
+        if not first_row:
+            google_call(worksheet.append_row, sheet_info["headers"], value_input_option="USER_ENTERED")
+            if sheet_info["default_rows"]:
+                google_call(worksheet.append_rows, sheet_info["default_rows"], value_input_option="USER_ENTERED")
+        elif first_row != sheet_info["headers"]:
+            st.warning(
+                f"La hoja {sheet_info['name']} existe, pero sus encabezados no coinciden con la app."
+            )
+
+    return True
 
 
 def records_to_df(records, columns):
@@ -170,24 +207,32 @@ def records_to_df(records, columns):
     return pd.DataFrame(records)
 
 
+@st.cache_data(ttl=20)
 def load_df(sheet_key):
+    """Lee una hoja y guarda el resultado por 20 segundos para evitar exceso de lecturas."""
     ws = get_ws(sheet_key)
-    records = ws.get_all_records()
+    records = google_call(ws.get_all_records)
     return records_to_df(records, SHEETS[sheet_key]["headers"])
+
+
+def clear_data_cache():
+    load_df.clear()
 
 
 def append_row(sheet_key, row):
     ws = get_ws(sheet_key)
-    ws.append_row(row, value_input_option="USER_ENTERED")
+    google_call(ws.append_row, row, value_input_option="USER_ENTERED")
+    clear_data_cache()
 
 
 def replace_sheet(sheet_key, rows):
     ws = get_ws(sheet_key)
     headers = SHEETS[sheet_key]["headers"]
-    ws.clear()
-    ws.append_row(headers)
+    google_call(ws.clear)
+    google_call(ws.append_row, headers, value_input_option="USER_ENTERED")
     if rows:
-        ws.append_rows(rows, value_input_option="USER_ENTERED")
+        google_call(ws.append_rows, rows, value_input_option="USER_ENTERED")
+    clear_data_cache()
 
 
 def now_text():
