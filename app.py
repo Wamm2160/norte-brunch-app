@@ -813,24 +813,48 @@ def change_saldo(saldos, key, amount):
 
 
 def normalize_ventas_financials(ventas):
-    """Corrige columnas financieras de ventas para reportes usando reglas actuales."""
+    """Corrige columnas financieras de ventas para reportes usando reglas actuales.
+
+    Corrección v19:
+    Google Sheets puede regresar columnas como string/Arrow.
+    Antes de escribir números, convertimos las columnas financieras a float
+    para evitar TypeError en Pandas.
+    """
     if ventas.empty:
         return ventas
 
     ventas = ventas.copy()
-    for col in [
+
+    numeric_cols = [
+        "cantidad",
+        "precio_unitario",
+        "total_linea",
         "ganancia_personal_unitaria",
         "ganancia_personal_linea",
         "diezmo_linea",
         "dinero_norte_linea",
         "total_neto_linea",
         "comision_terminal_linea",
-    ]:
+        "monto_tarjeta_linea",
+    ]
+
+    for col in numeric_cols:
         if col not in ventas.columns:
             ventas[col] = 0
+        ventas[col] = pd.to_numeric(ventas[col], errors="coerce").fillna(0.0).astype(float)
+
+    # Evita problemas con índices raros o duplicados al usar .at
+    ventas = ventas.reset_index(drop=True)
 
     for idx, row in ventas.iterrows():
         fee = to_float(row.get("comision_terminal_linea", 0))
+
+        # Si por alguna razón la comisión no fue guardada pero hubo tarjeta, la recalculamos.
+        if fee <= 0:
+            card_line = to_float(row.get("monto_tarjeta_linea", 0))
+            fee = round(card_line * CARD_FEE_RATE, 2)
+            ventas.loc[idx, "comision_terminal_linea"] = fee
+
         calc = calculate_line_financials(
             row.get("producto", ""),
             to_float(row.get("cantidad", 0)),
@@ -838,11 +862,12 @@ def normalize_ventas_financials(ventas):
             to_float(row.get("ganancia_personal_unitaria", 0)),
             card_fee_line=fee,
         )
-        ventas.at[idx, "ganancia_personal_unitaria"] = calc["unit_profit"]
-        ventas.at[idx, "ganancia_personal_linea"] = calc["personal_profit_line"]
-        ventas.at[idx, "diezmo_linea"] = calc["tithing_line"]
-        ventas.at[idx, "dinero_norte_linea"] = calc["norte_line"]
-        ventas.at[idx, "total_neto_linea"] = calc["net_line"]
+
+        ventas.loc[idx, "ganancia_personal_unitaria"] = float(calc["unit_profit"])
+        ventas.loc[idx, "ganancia_personal_linea"] = float(calc["personal_profit_line"])
+        ventas.loc[idx, "diezmo_linea"] = float(calc["tithing_line"])
+        ventas.loc[idx, "dinero_norte_linea"] = float(calc["norte_line"])
+        ventas.loc[idx, "total_neto_linea"] = float(calc["net_line"])
 
     return ventas
 
@@ -872,12 +897,12 @@ def calculate_general_sales_totals_from_ventas():
     ventas = normalize_ventas_financials(ventas)
 
     return {
-        "ventas_totales_brutas": round(ventas["total_linea"].sum(), 2),
-        "ventas_totales_netas": round(ventas["total_neto_linea"].sum(), 2),
-        "total_para_norte": round(ventas["dinero_norte_linea"].sum(), 2),
-        "total_para_paga_personal": round(ventas["ganancia_personal_linea"].sum(), 2),
-        "total_para_diezmo": round(ventas["diezmo_linea"].sum(), 2),
-        "total_comisiones_terminal": round(ventas["comision_terminal_linea"].sum(), 2),
+        "ventas_totales_brutas": round(float(ventas["total_linea"].sum()), 2),
+        "ventas_totales_netas": round(float(ventas["total_neto_linea"].sum()), 2),
+        "total_para_norte": round(float(ventas["dinero_norte_linea"].sum()), 2),
+        "total_para_paga_personal": round(float(ventas["ganancia_personal_linea"].sum()), 2),
+        "total_para_diezmo": round(float(ventas["diezmo_linea"].sum()), 2),
+        "total_comisiones_terminal": round(float(ventas["comision_terminal_linea"].sum()), 2),
     }
 
 
