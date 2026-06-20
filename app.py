@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 import gspread
+from gspread.exceptions import APIError
 from google.oauth2 import service_account
 
 
@@ -232,21 +233,24 @@ def get_spreadsheet():
 
 
 def google_call(func, *args, **kwargs):
-    """Ejecuta una llamada a Google Sheets con reintentos si aparece error 429."""
-    delay = 1.0
+    """Ejecuta llamadas a Google Sheets con reintentos para evitar fallas por cuota o red."""
+    last_error = None
+
     for attempt in range(5):
         try:
             return func(*args, **kwargs)
-        except gspread.exceptions.APIError as error:
-            message = str(error)
-            if "429" in message and attempt < 4:
-                time.sleep(delay + random.random())
-                delay *= 2
-                continue
-            raise
+        except APIError as error:
+            last_error = error
+            wait_time = min(2 ** attempt, 16)
+            time.sleep(wait_time)
+        except Exception as error:
+            last_error = error
+            wait_time = min(2 ** attempt, 8)
+            time.sleep(wait_time)
+
+    raise last_error
 
 
-@st.cache_resource
 def get_worksheet_map():
     spreadsheet = get_spreadsheet()
     worksheets = google_call(spreadsheet.worksheets)
@@ -302,25 +306,44 @@ def setup_workbook():
     return True
 
 
-@st.cache_data(ttl=15)
+@st.cache_data(ttl=120)
 def load_df(sheet_key):
+    """Carga una hoja con menos riesgo de error que get_all_records."""
     ws = get_ws(sheet_key)
-    records = google_call(ws.get_all_records)
-    expected = SHEETS[sheet_key]["headers"]
-    df = pd.DataFrame(records)
+    try:
+        values = google_call(ws.get_all_values)
+    except APIError as error:
+        st.error(
+            "Google Sheets no dejó leer la información en este momento. "
+            "Espera 1 minuto y presiona Reboot/Refresh. "
+            "Si sigue pasando, revisa que la hoja esté compartida con el correo del service account."
+        )
+        st.stop()
+    except Exception as error:
+        st.error("No se pudo leer Google Sheets. Revisa conexión, permisos o Secrets.")
+        st.stop()
 
-    if df.empty:
-        return pd.DataFrame(columns=expected)
+    if not values:
+        return pd.DataFrame()
 
-    for col in expected:
-        if col not in df.columns:
-            df[col] = ""
+    headers = [str(h).strip() for h in values[0]]
+    rows = values[1:]
 
-    return df
+    cleaned_rows = []
+    for row in rows:
+        padded = row + [""] * (len(headers) - len(row))
+        cleaned_rows.append(padded[:len(headers)])
 
-
+    return pd.DataFrame(cleaned_rows, columns=headers)
 def clear_data_cache():
-    load_df.clear()
+    try:
+        load_df.clear()
+    except Exception:
+        pass
+    try:
+        ensure_required_product_prices.clear()
+    except Exception:
+        pass
 
 
 def append_record(sheet_key, record):
