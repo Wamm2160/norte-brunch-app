@@ -1,4 +1,5 @@
 import uuid
+import base64
 import time
 import random
 from datetime import datetime, date, timedelta, time as dt_time
@@ -499,6 +500,20 @@ def apply_branding():
             border-radius: 14px;
             font-weight: 700;
         }
+
+        .nb-logo-wrap {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .nb-logo-wrap img {
+            max-width: 330px;
+            width: min(72vw, 330px);
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -927,9 +942,17 @@ def apply_norte_brunch_style():
 
         .stApp {
             background:
-                radial-gradient(circle at top left, rgba(216,137,30,0.10), transparent 26rem),
-                linear-gradient(180deg, #0b0b0a 0%, #151515 100%);
+                radial-gradient(circle at top left, rgba(216,137,30,0.06), transparent 24rem),
+                linear-gradient(180deg, #000000 0%, #050505 48%, #090807 100%);
             color: var(--nb-cream);
+        }
+
+        .block-container {
+            background: rgba(10, 10, 9, 0.72);
+            border: 1px solid rgba(244, 232, 210, 0.08);
+            border-radius: 18px;
+            padding-top: 1.3rem;
+            box-shadow: 0 0 35px rgba(0,0,0,.55);
         }
 
         h1, h2, h3 {
@@ -942,8 +965,8 @@ def apply_norte_brunch_style():
         }
 
         [data-testid="stSidebar"] {
-            background: #0A0A09;
-            border-right: 1px solid var(--nb-border);
+            background: #000000;
+            border-right: 1px solid #2A241D;
         }
 
         [data-testid="stSidebar"] * {
@@ -967,8 +990,8 @@ def apply_norte_brunch_style():
         }
 
         div[data-testid="stMetric"] {
-            background: rgba(31,29,26,.92);
-            border: 1px solid var(--nb-border);
+            background: #14120F;
+            border: 1px solid #4A3621;
             border-radius: 14px;
             padding: 1rem;
             box-shadow: 0 2px 10px rgba(0,0,0,.25);
@@ -983,7 +1006,8 @@ def apply_norte_brunch_style():
         }
 
         .stDataFrame, .stTable {
-            background: var(--nb-panel);
+            background: #11100E;
+            border: 1px solid #30261C;
             border-radius: 12px;
         }
 
@@ -1005,13 +1029,13 @@ def apply_norte_brunch_style():
         }
 
         .nb-header {
-            background: linear-gradient(90deg, #0A0A09 0%, #18140f 54%, #0A0A09 100%);
-            border: 1px solid var(--nb-border);
+            background: linear-gradient(90deg, #000000 0%, #0E0B07 54%, #000000 100%);
+            border: 1px solid #3F2B18;
             border-radius: 18px;
-            padding: 1rem 1.2rem;
+            padding: .7rem 1rem;
             margin-bottom: 1.1rem;
             text-align: center;
-            box-shadow: 0 4px 18px rgba(0,0,0,.35);
+            box-shadow: 0 4px 24px rgba(0,0,0,.75);
         }
 
         .nb-header-title {
@@ -1093,6 +1117,20 @@ def apply_norte_brunch_style():
         input, textarea, [data-baseweb="select"] {
             border-radius: 10px !important;
         }
+
+        .nb-logo-wrap {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .nb-logo-wrap img {
+            max-width: 330px;
+            width: min(72vw, 330px);
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -1104,7 +1142,12 @@ def render_brand_header():
     st.markdown('<div class="nb-header">', unsafe_allow_html=True)
 
     if logo_path.exists():
-        st.image(str(logo_path), use_container_width=True)
+        logo_bytes = logo_path.read_bytes()
+        logo_b64 = base64.b64encode(logo_bytes).decode("utf-8")
+        st.markdown(
+            f'<div class="nb-logo-wrap"><img src="data:image/png;base64,{logo_b64}" alt="Norte Brunch logo"></div>',
+            unsafe_allow_html=True,
+        )
     else:
         st.markdown('<div class="nb-header-title">NORTE brunch</div>', unsafe_allow_html=True)
 
