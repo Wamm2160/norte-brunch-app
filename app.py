@@ -411,6 +411,25 @@ def init_cart():
         st.session_state.cart = []
 
 
+def add_product_to_cart(products, product, quantity=1):
+    row = products[products["producto"] == product].iloc[0]
+    unit_price = float(row["precio"])
+    unit_profit = float(row["ganancia_personal"])
+    line_total = round(quantity * unit_price, 2)
+    line_profit = round(quantity * unit_profit, 2)
+    norte_money = round(line_total - line_profit, 2)
+
+    st.session_state.cart.append({
+        "producto": product,
+        "cantidad": int(quantity),
+        "precio_unitario": unit_price,
+        "ganancia_personal_unitaria": unit_profit,
+        "total_linea": line_total,
+        "ganancia_personal_linea": line_profit,
+        "dinero_norte_linea": norte_money,
+    })
+
+
 def page_registrar_pedido():
     init_cart()
 
@@ -424,6 +443,27 @@ def page_registrar_pedido():
 
     product_names = products["producto"].tolist()
 
+    st.subheader("Venta rápida")
+    st.caption("Toca un botón para agregar 1 unidad al pedido. Ideal para usar desde el iPhone.")
+
+    # Botones grandes en filas de 2 columnas para que se vean cómodos en celular.
+    for i in range(0, len(product_names), 2):
+        cols = st.columns(2)
+        for j, col in enumerate(cols):
+            idx = i + j
+            if idx < len(product_names):
+                product_button = product_names[idx]
+                product_row = products[products["producto"] == product_button].iloc[0]
+                price = float(product_row["precio"])
+                label = f"{product_button}\n{pesos(price)}"
+                if col.button(label, key=f"quick_{product_button}", use_container_width=True):
+                    add_product_to_cart(products, product_button, 1)
+                    st.success(f"Agregado: {product_button}")
+                    st.rerun()
+
+    st.divider()
+    st.subheader("Agregar con cantidad")
+
     with st.form("add_to_cart"):
         col1, col2 = st.columns([2, 1])
         with col1:
@@ -434,22 +474,7 @@ def page_registrar_pedido():
         add = st.form_submit_button("Agregar al pedido")
 
     if add:
-        row = products[products["producto"] == product].iloc[0]
-        unit_price = float(row["precio"])
-        unit_profit = float(row["ganancia_personal"])
-        line_total = round(quantity * unit_price, 2)
-        line_profit = round(quantity * unit_profit, 2)
-        norte_money = round(line_total - line_profit, 2)
-
-        st.session_state.cart.append({
-            "producto": product,
-            "cantidad": int(quantity),
-            "precio_unitario": unit_price,
-            "ganancia_personal_unitaria": unit_profit,
-            "total_linea": line_total,
-            "ganancia_personal_linea": line_profit,
-            "dinero_norte_linea": norte_money,
-        })
+        add_product_to_cart(products, product, quantity)
         st.success("Producto agregado.")
 
     if st.session_state.cart:
