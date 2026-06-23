@@ -39,46 +39,58 @@ SHEETS = {
         "headers": ["producto", "precio", "ganancia_personal", "activo"],
         "default_rows": DEFAULT_PRODUCTS,
     },
+    "pedidos": {
+        "name": "Pedidos",
+        "headers": [
+            "fecha_hora", "fecha", "hora",
+            "pedido_id", "pedido_numero", "estado",
+            "producto", "cantidad", "precio_unitario", "ganancia_personal_unitaria",
+            "total_linea", "ganancia_personal_linea", "dinero_norte_linea", "nota",
+        ],
+        "default_rows": [],
+    },
     "ventas": {
         "name": "Ventas",
         "headers": [
-            "fecha_hora", "fecha", "hora", "venta_id", "producto", "cantidad",
-            "precio_unitario", "ganancia_personal_unitaria", "total_linea",
-            "ganancia_personal_linea", "diezmo_sugerido_linea",
-            "dinero_norte_linea", "metodo_pago", "comision_terminal_linea",
-            "total_neto_linea", "nota",
+            "fecha_hora", "fecha", "hora",
+            "venta_id", "pedido_id", "pedido_numero",
+            "producto", "cantidad", "precio_unitario", "ganancia_personal_unitaria",
+            "total_linea", "ganancia_personal_linea", "dinero_norte_linea",
+            "metodo_pago", "comision_terminal_linea", "total_neto_linea", "nota",
         ],
         "default_rows": [],
     },
     "gastos": {
         "name": "Gastos",
         "headers": [
-            "fecha_hora", "fecha", "hora", "gasto_id", "categoria", "producto_gasto",
-            "monto", "pagado_con", "aumenta_deuda", "nota",
+            "fecha_hora", "fecha", "hora",
+            "gasto_id", "producto_gasto", "monto",
+            "pagado_con", "aumenta_deuda", "nota",
         ],
         "default_rows": [],
     },
     "pagos_personales": {
         "name": "Pagos_Personales",
         "headers": [
-            "fecha_hora", "fecha", "hora", "pago_id", "monto_pago_bruto",
-            "diezmo_sugerido", "pago_libre_estimado", "nota",
+            "fecha_hora", "fecha", "hora",
+            "pago_id", "monto_pago_bruto", "diezmo_sugerido",
+            "pago_libre_estimado", "nota",
         ],
         "default_rows": [],
     },
     "deuda_movimientos": {
         "name": "Deuda_Movimientos",
         "headers": [
-            "fecha_hora", "fecha", "hora", "movimiento_id", "tipo", "monto",
-            "deuda_resultante", "nota",
+            "fecha_hora", "fecha", "hora",
+            "movimiento_id", "tipo", "monto", "deuda_resultante", "nota",
         ],
         "default_rows": [],
     },
     "ajustes_saldo": {
         "name": "Ajustes_Saldo",
         "headers": [
-            "fecha_hora", "fecha", "hora", "ajuste_id", "tipo", "monto",
-            "saldo_resultante", "nota",
+            "fecha_hora", "fecha", "hora",
+            "ajuste_id", "tipo", "monto", "saldo_resultante", "nota",
         ],
         "default_rows": [],
     },
@@ -90,8 +102,6 @@ SHEETS = {
             ["deuda_norte_a_mi", 0],
             ["ganancia_personal_pendiente", 0],
             ["ganancia_personal_pagada", 0],
-            ["diezmo_sugerido_total", 0],
-            ["diezmo_sugerido_pagado", 0],
             ["ventas_totales_brutas", 0],
             ["ventas_totales_netas", 0],
             ["total_para_norte", 0],
@@ -176,38 +186,26 @@ def apply_mobile_style():
             padding-right: .8rem;
             max-width: 760px;
         }
-
         .nb-logo-wrap {
             display: flex;
             justify-content: center;
             align-items: center;
             margin-bottom: .25rem;
         }
-
         .nb-logo-wrap img {
-            max-width: 230px;
-            width: min(65vw, 230px);
+            max-width: 220px;
+            width: min(64vw, 220px);
             height: auto;
             display: block;
             margin: 0 auto;
         }
-
-        .nb-title {
-            text-align: center;
-            font-weight: 900;
-            font-size: 1.55rem;
-            margin-bottom: .1rem;
-            color: #1F2933;
-        }
-
         .nb-subtitle {
             text-align: center;
-            font-weight: 700;
-            font-size: .84rem;
-            color: #6B4E2E;
+            font-weight: 800;
+            font-size: .85rem;
+            color: #5C3D1E;
             margin-bottom: .8rem;
         }
-
         .nb-total {
             border: 2px solid #D32F2F;
             border-radius: 18px;
@@ -216,20 +214,17 @@ def apply_mobile_style():
             text-align: center;
             background: #FFF8F8;
         }
-
         .nb-total .label {
             font-weight: 900;
             font-size: .9rem;
             color: #4B5563;
         }
-
         .nb-total .amount {
             font-weight: 1000;
             font-size: 2.45rem;
             line-height: 1;
             color: #D32F2F;
         }
-
         .nb-paid {
             border: 2px solid #2E7D32;
             border-radius: 18px;
@@ -238,38 +233,32 @@ def apply_mobile_style():
             text-align: center;
             background: #F1FFF3;
         }
-
         .nb-paid .label {
             font-weight: 900;
             font-size: .9rem;
             color: #1F2933;
         }
-
         .nb-paid .amount {
             font-weight: 1000;
             font-size: 2.25rem;
             line-height: 1;
             color: #2E7D32;
         }
-
         .stButton > button {
             min-height: 3rem;
             border-radius: 14px;
             font-weight: 850;
             width: 100%;
         }
-
         div[data-testid="stMetric"] {
             border: 1px solid #E5E7EB;
             border-radius: 14px;
             padding: .7rem;
             background: #FFFFFF;
         }
-
-        label, p, div, span {
+        label, p, div, span, h1, h2, h3 {
             color: #1F2933;
         }
-
         input, textarea {
             color: #111827 !important;
         }
@@ -288,8 +277,8 @@ def render_header():
             unsafe_allow_html=True,
         )
     else:
-        st.markdown('<div class="nb-title">Norte Brunch</div>', unsafe_allow_html=True)
-    st.markdown('<div class="nb-subtitle">Control simple del negocio</div>', unsafe_allow_html=True)
+        st.title("Norte Brunch")
+    st.markdown('<div class="nb-subtitle">Control del negocio</div>', unsafe_allow_html=True)
 
 
 def big_total(label, amount):
@@ -340,48 +329,16 @@ def get_workbook():
     client = get_client()
 
     spreadsheet_id = st.secrets.get("spreadsheet_id", "")
-
-    # Compatibilidad con distintas formas de guardar el ID.
-    # La app anterior usaba [google_sheet] spreadsheet_id.
     if not spreadsheet_id:
         spreadsheet_id = st.secrets.get("google_sheet", {}).get("spreadsheet_id", "")
-
-    # También aceptamos spreadsheet_id dentro de [app] por si se pegó ahí por error.
     if not spreadsheet_id:
         spreadsheet_id = st.secrets.get("app", {}).get("spreadsheet_id", "")
 
     if not spreadsheet_id:
-        st.error(
-            "Falta `spreadsheet_id` en Streamlit Secrets. "
-            "Puedes dejarlo como antes en [google_sheet], o ponerlo hasta arriba."
-        )
-        with st.expander("Ejemplo correcto de Secrets"):
-            st.code(
-                """[google_sheet]
-spreadsheet_id = "PEGA_AQUI_EL_ID_DE_TU_GOOGLE_SHEET"
-
-[app]
-password = "TU_CONTRASEÑA"
-
-[gcp_service_account]
-type = "service_account"
-project_id = "..."
-private_key_id = "..."
-private_key = "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n"
-client_email = "..."
-client_id = "..."
-auth_uri = "https://accounts.google.com/o/oauth2/auth"
-token_uri = "https://oauth2.googleapis.com/token"
-auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
-client_x509_cert_url = "..."
-universe_domain = "googleapis.com" """,
-                language="toml",
-            )
+        st.error("Falta spreadsheet_id en Streamlit Secrets. Puedes usar [google_sheet] spreadsheet_id como antes.")
         st.stop()
 
-    spreadsheet_id = str(spreadsheet_id).strip()
-
-    return client.open_by_key(spreadsheet_id)
+    return client.open_by_key(str(spreadsheet_id).strip())
 
 
 def google_call(func, *args, **kwargs):
@@ -498,10 +455,9 @@ def get_saldos():
 
     numeric_keys = [
         "saldo_norte_brunch", "deuda_norte_a_mi", "ganancia_personal_pendiente",
-        "ganancia_personal_pagada", "diezmo_sugerido_total", "diezmo_sugerido_pagado",
-        "ventas_totales_brutas", "ventas_totales_netas", "total_para_norte",
-        "total_gastos_negocio", "gastos_pagados_norte", "gastos_pagados_personal",
-        "total_comisiones_terminal",
+        "ganancia_personal_pagada", "ventas_totales_brutas", "ventas_totales_netas",
+        "total_para_norte", "total_gastos_negocio", "gastos_pagados_norte",
+        "gastos_pagados_personal", "total_comisiones_terminal",
     ]
 
     for key in numeric_keys:
@@ -533,8 +489,12 @@ def set_saldo_manual(new_amount, note):
     save_saldos(saldos)
 
     append_record("ajustes_saldo", {
-        **now_record(), "ajuste_id": str(uuid.uuid4()), "tipo": "ajuste manual",
-        "monto": new_amount, "saldo_resultante": saldos["saldo_norte_brunch"], "nota": note,
+        **now_record(),
+        "ajuste_id": str(uuid.uuid4()),
+        "tipo": "ajuste manual",
+        "monto": new_amount,
+        "saldo_resultante": saldos["saldo_norte_brunch"],
+        "nota": note,
     })
 
 
@@ -544,8 +504,12 @@ def set_deuda_manual(new_amount, note):
     save_saldos(saldos)
 
     append_record("deuda_movimientos", {
-        **now_record(), "movimiento_id": str(uuid.uuid4()), "tipo": "ajuste manual",
-        "monto": new_amount, "deuda_resultante": saldos["deuda_norte_a_mi"], "nota": note,
+        **now_record(),
+        "movimiento_id": str(uuid.uuid4()),
+        "tipo": "ajuste manual",
+        "monto": new_amount,
+        "deuda_resultante": saldos["deuda_norte_a_mi"],
+        "nota": note,
     })
 
 
@@ -564,13 +528,21 @@ def pay_debt(amount, note):
     save_saldos(saldos)
 
     append_record("deuda_movimientos", {
-        **now_record(), "movimiento_id": str(uuid.uuid4()), "tipo": "pago",
-        "monto": amount, "deuda_resultante": saldos["deuda_norte_a_mi"], "nota": note,
+        **now_record(),
+        "movimiento_id": str(uuid.uuid4()),
+        "tipo": "pago",
+        "monto": amount,
+        "deuda_resultante": saldos["deuda_norte_a_mi"],
+        "nota": note,
     })
 
     append_record("ajustes_saldo", {
-        **now_record(), "ajuste_id": str(uuid.uuid4()), "tipo": "pago de deuda",
-        "monto": -amount, "saldo_resultante": saldos["saldo_norte_brunch"], "nota": note,
+        **now_record(),
+        "ajuste_id": str(uuid.uuid4()),
+        "tipo": "pago de deuda",
+        "monto": -amount,
+        "saldo_resultante": saldos["saldo_norte_brunch"],
+        "nota": note,
     })
 
 
@@ -593,7 +565,7 @@ def can_alert_debt_payment():
     days = (mx_now() - last_dt).days
     if days >= 7:
         return True, f"El saldo lleva {days} días sin movimiento."
-    return False, f"El saldo todavía se ha movido recientemente. Último movimiento: {last}."
+    return False, f"El saldo todavía se movió recientemente. Último movimiento: {last}."
 
 
 def load_products(active_only=True):
@@ -602,7 +574,11 @@ def load_products(active_only=True):
         return pd.DataFrame(columns=SHEETS["productos"]["headers"])
     df = df.copy()
     for col in ["precio", "ganancia_personal"]:
+        if col not in df.columns:
+            df[col] = 0
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype(float)
+    if "activo" not in df.columns:
+        df["activo"] = "si"
     df["activo"] = df["activo"].astype(str).str.lower().replace("", "si")
     if active_only:
         df = df[df["activo"] != "no"]
@@ -629,7 +605,6 @@ def calculate_line(product, quantity, price, profit, card_fee=0):
 
     total = round(quantity * price, 2)
     profit_line = round(quantity * profit, 2)
-    tithing = round(profit_line * TITHING_RATE, 2)
     norte = round(total - profit_line - card_fee, 2)
     net = round(total - card_fee, 2)
 
@@ -640,31 +615,179 @@ def calculate_line(product, quantity, price, profit, card_fee=0):
         "ganancia_personal_unitaria": profit,
         "total_linea": total,
         "ganancia_personal_linea": profit_line,
-        "diezmo_sugerido_linea": tithing,
         "dinero_norte_linea": norte,
         "comision_terminal_linea": card_fee,
         "total_neto_linea": net,
     }
 
 
-def init_cart():
-    if "cart" not in st.session_state:
-        st.session_state.cart = []
+def load_pedidos():
+    df = load_df("pedidos")
+    if df.empty:
+        return pd.DataFrame(columns=SHEETS["pedidos"]["headers"])
+
+    numeric = [
+        "pedido_numero", "cantidad", "precio_unitario", "ganancia_personal_unitaria",
+        "total_linea", "ganancia_personal_linea", "dinero_norte_linea",
+    ]
+    for col in numeric:
+        if col not in df.columns:
+            df[col] = 0
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+
+    if "estado" not in df.columns:
+        df["estado"] = ""
+    return df
 
 
-def cart_totals():
-    total = sum(to_float(i["total_linea"]) for i in st.session_state.cart)
-    profit = sum(to_float(i["ganancia_personal_linea"]) for i in st.session_state.cart)
-    tithing = round(profit * TITHING_RATE, 2)
-    return {"total": round(total, 2), "profit": round(profit, 2), "tithing": round(tithing, 2)}
+def save_pedidos_df(df):
+    records = []
+    for _, row in df.iterrows():
+        records.append({h: row.get(h, "") for h in SHEETS["pedidos"]["headers"]})
+    replace_records("pedidos", records)
 
 
-def register_sale(payment_method, note):
-    if not st.session_state.cart:
-        st.error("No hay productos en la venta.")
+def get_next_order_number(today_text=None):
+    if today_text is None:
+        today_text = mx_now().strftime("%Y-%m-%d")
+    df = load_pedidos()
+    if df.empty:
+        return 1
+
+    today_orders = df[df["fecha"].astype(str) == str(today_text)]
+    if today_orders.empty:
+        return 1
+
+    nums = pd.to_numeric(today_orders["pedido_numero"], errors="coerce").fillna(0)
+    max_num = int(nums.max()) if not nums.empty else 0
+    return max_num + 1
+
+
+def create_pending_order(note=""):
+    fecha = now_record()
+    pedido_id = str(uuid.uuid4())
+    pedido_numero = get_next_order_number(fecha["fecha"])
+
+    append_record("pedidos", {
+        **fecha,
+        "pedido_id": pedido_id,
+        "pedido_numero": pedido_numero,
+        "estado": "pendiente",
+        "producto": "",
+        "cantidad": 0,
+        "precio_unitario": 0,
+        "ganancia_personal_unitaria": 0,
+        "total_linea": 0,
+        "ganancia_personal_linea": 0,
+        "dinero_norte_linea": 0,
+        "nota": note,
+    })
+    return pedido_id, pedido_numero
+
+
+def pending_order_ids():
+    df = load_pedidos()
+    if df.empty:
+        return []
+
+    pending = df[df["estado"].astype(str).str.lower() == "pendiente"].copy()
+    if pending.empty:
+        return []
+
+    result = []
+    for pedido_id, group in pending.groupby("pedido_id", sort=False):
+        if str(pedido_id).strip() == "":
+            continue
+        numero = int(pd.to_numeric(group["pedido_numero"], errors="coerce").fillna(0).max())
+        fecha = str(group["fecha"].iloc[0])
+        total = float(group["total_linea"].sum())
+        result.append({
+            "pedido_id": pedido_id,
+            "pedido_numero": numero,
+            "fecha": fecha,
+            "total": total,
+            "label": f"Pedido {numero} · {fecha} · {pesos(total)}",
+        })
+    return result
+
+
+def add_line_to_order(pedido_id, product_name, quantity):
+    products = load_products(active_only=True)
+    row = products[products["producto"] == product_name].iloc[0]
+    line = calculate_line(row["producto"], quantity, row["precio"], row["ganancia_personal"])
+
+    df = load_pedidos()
+    order_rows = df[df["pedido_id"] == pedido_id]
+    if order_rows.empty:
+        st.error("No encontré el pedido.")
         return
 
-    totals = cart_totals()
+    pedido_numero = int(pd.to_numeric(order_rows["pedido_numero"], errors="coerce").fillna(0).max())
+
+    append_record("pedidos", {
+        **now_record(),
+        "pedido_id": pedido_id,
+        "pedido_numero": pedido_numero,
+        "estado": "pendiente",
+        "producto": line["producto"],
+        "cantidad": line["cantidad"],
+        "precio_unitario": line["precio_unitario"],
+        "ganancia_personal_unitaria": line["ganancia_personal_unitaria"],
+        "total_linea": line["total_linea"],
+        "ganancia_personal_linea": line["ganancia_personal_linea"],
+        "dinero_norte_linea": line["dinero_norte_linea"],
+        "nota": "",
+    })
+
+
+def remove_order_line(row_index):
+    df = load_pedidos()
+    if df.empty:
+        return
+    if row_index in df.index:
+        df.loc[row_index, "estado"] = "eliminado"
+        save_pedidos_df(df)
+
+
+def cancel_order(pedido_id):
+    df = load_pedidos()
+    if df.empty:
+        return
+    mask = (df["pedido_id"].astype(str) == str(pedido_id)) & (df["estado"].astype(str).str.lower() == "pendiente")
+    df.loc[mask, "estado"] = "cancelado"
+    save_pedidos_df(df)
+
+
+def get_order_lines(pedido_id, keep_index=False):
+    df = load_pedidos()
+    if df.empty:
+        return pd.DataFrame(columns=SHEETS["pedidos"]["headers"])
+
+    lines = df[
+        (df["pedido_id"].astype(str) == str(pedido_id))
+        & (df["estado"].astype(str).str.lower() == "pendiente")
+        & (df["producto"].astype(str).str.strip() != "")
+    ].copy()
+    return lines if keep_index else lines.reset_index(drop=True)
+
+
+def order_totals(lines):
+    if lines.empty:
+        return {"total": 0, "profit": 0, "norte": 0}
+    return {
+        "total": round(float(lines["total_linea"].sum()), 2),
+        "profit": round(float(lines["ganancia_personal_linea"].sum()), 2),
+        "norte": round(float(lines["dinero_norte_linea"].sum()), 2),
+    }
+
+
+def pay_order(pedido_id, payment_method, note):
+    lines = get_order_lines(pedido_id)
+    if lines.empty:
+        st.error("Este pedido no tiene artículos pendientes.")
+        return
+
+    totals = order_totals(lines)
     total = totals["total"]
     venta_id = str(uuid.uuid4())
 
@@ -672,38 +795,47 @@ def register_sale(payment_method, note):
     fee_total = round(card_total * CARD_FEE_RATE, 2)
 
     total_profit = 0
-    total_tithing = 0
     total_norte = 0
     total_net = 0
 
-    for item in st.session_state.cart:
+    for _, item in lines.iterrows():
         share = to_float(item["total_linea"]) / total if total else 0
         fee_line = round(fee_total * share, 2)
 
         line = calculate_line(
-            item["producto"], item["cantidad"], item["precio_unitario"],
-            item["ganancia_personal_unitaria"], card_fee=fee_line,
+            item["producto"],
+            item["cantidad"],
+            item["precio_unitario"],
+            item["ganancia_personal_unitaria"],
+            card_fee=fee_line,
         )
 
         total_profit += line["ganancia_personal_linea"]
-        total_tithing += line["diezmo_sugerido_linea"]
         total_norte += line["dinero_norte_linea"]
         total_net += line["total_neto_linea"]
 
         append_record("ventas", {
-            **now_record(), "venta_id": venta_id, **line,
-            "metodo_pago": payment_method, "nota": note,
+            **now_record(),
+            "venta_id": venta_id,
+            "pedido_id": pedido_id,
+            "pedido_numero": item.get("pedido_numero", ""),
+            **line,
+            "metodo_pago": payment_method,
+            "nota": note,
         })
 
     total_profit = round(total_profit, 2)
-    total_tithing = round(total_tithing, 2)
     total_norte = round(total_norte, 2)
     total_net = round(total_net, 2)
+
+    df = load_pedidos()
+    mask = (df["pedido_id"].astype(str) == str(pedido_id)) & (df["estado"].astype(str).str.lower() == "pendiente")
+    df.loc[mask, "estado"] = "pagado"
+    save_pedidos_df(df)
 
     saldos = get_saldos()
     change_saldo(saldos, "saldo_norte_brunch", total_net)
     change_saldo(saldos, "ganancia_personal_pendiente", total_profit)
-    change_saldo(saldos, "diezmo_sugerido_total", total_tithing)
     change_saldo(saldos, "ventas_totales_brutas", total)
     change_saldo(saldos, "ventas_totales_netas", total_net)
     change_saldo(saldos, "total_para_norte", total_norte)
@@ -711,11 +843,10 @@ def register_sale(payment_method, note):
     mark_saldo_movement(saldos)
     save_saldos(saldos)
 
-    st.session_state.cart = []
-    big_paid("VENTA REGISTRADA", total_net)
+    big_paid("PEDIDO PAGADO", total_net)
     st.success(
         f"Venta bruta: {pesos(total)} | Para tu paga: {pesos(total_profit)} | "
-        f"Diezmo sugerido: {pesos(total_tithing)} | Para Norte Brunch: {pesos(total_norte)}"
+        f"Para Norte Brunch: {pesos(total_norte)}"
     )
     st.rerun()
 
@@ -726,7 +857,7 @@ def ventas_df():
         return df
     numeric = [
         "cantidad", "precio_unitario", "ganancia_personal_unitaria", "total_linea",
-        "ganancia_personal_linea", "diezmo_sugerido_linea", "dinero_norte_linea",
+        "ganancia_personal_linea", "dinero_norte_linea",
         "comision_terminal_linea", "total_neto_linea",
     ]
     for col in numeric:
@@ -756,13 +887,19 @@ def filter_by_period(df, start_date, end_date):
 
 def period_picker(prefix):
     today = mx_now().date()
-    option = st.selectbox("Periodo", ["Hoy", "Esta semana", "Este mes", "Personalizado"], key=f"{prefix}_periodo")
+    option = st.selectbox(
+        "Periodo",
+        ["Hoy", "Esta semana", "Este mes", "Personalizado"],
+        key=f"{prefix}_periodo",
+    )
 
     if option == "Hoy":
         return today, today
+
     if option == "Esta semana":
         start = today - timedelta(days=today.weekday())
         return start, today
+
     if option == "Este mes":
         return today.replace(day=1), today
 
@@ -773,70 +910,89 @@ def period_picker(prefix):
 
 
 def page_venta():
-    init_cart()
-    st.header("Registrar venta")
+    st.header("Pedidos")
+
     products = load_products(active_only=True)
     if products.empty:
         st.warning("No hay productos activos.")
         return
 
-    st.subheader("Productos rápidos")
-    cols = st.columns(2)
-    for idx, row in products.iterrows():
-        label = f"{row['producto']}\n{pesos(row['precio'])}"
-        if cols[idx % 2].button(label, key=f"quick_{idx}"):
-            line = calculate_line(row["producto"], 1, row["precio"], row["ganancia_personal"])
-            st.session_state.cart.append(line)
-            st.rerun()
-
-    st.divider()
-    st.subheader("Agregar con cantidad")
-    c1, c2 = st.columns([2, 1])
-    product_name = c1.selectbox("Producto", products["producto"].tolist())
-    qty = c2.number_input("Cantidad", min_value=1, value=1, step=1)
-
-    if st.button("Agregar al carrito"):
-        row = products[products["producto"] == product_name].iloc[0]
-        line = calculate_line(row["producto"], qty, row["precio"], row["ganancia_personal"])
-        st.session_state.cart.append(line)
+    if st.button("Crear nuevo pedido"):
+        _, numero = create_pending_order()
+        st.success(f"Pedido {numero} creado.")
         st.rerun()
 
-    st.divider()
-    st.subheader("Carrito")
-    if not st.session_state.cart:
-        st.info("Todavía no hay productos en esta venta.")
+    pedidos = pending_order_ids()
+    if not pedidos:
+        st.info("No hay pedidos pendientes. Crea un pedido para empezar.")
         return
 
-    for idx, item in enumerate(st.session_state.cart):
-        c1, c2, c3 = st.columns([3, 1, 1])
-        c1.write(f"**{item['producto']}** x {item['cantidad']}")
-        c2.write(pesos(item["total_linea"]))
-        if c3.button("Quitar", key=f"remove_{idx}"):
-            st.session_state.cart.pop(idx)
+    selected_label = st.selectbox("Pedido pendiente", [p["label"] for p in pedidos])
+    selected = next(p for p in pedidos if p["label"] == selected_label)
+    pedido_id = selected["pedido_id"]
+
+    st.subheader(f"Pedido {selected['pedido_numero']}")
+
+    st.write("Agregar artículos")
+    cols = st.columns(2)
+    for idx, row in products.iterrows():
+        label = f"{row['producto']} · {pesos(row['precio'])}"
+        if cols[idx % 2].button(label, key=f"order_quick_{pedido_id}_{idx}"):
+            add_line_to_order(pedido_id, row["producto"], 1)
             st.rerun()
 
-    totals = cart_totals()
-    big_total("TOTAL A COBRAR", totals["total"])
+    with st.expander("Agregar con cantidad"):
+        c1, c2 = st.columns([2, 1])
+        product_name = c1.selectbox("Producto", products["producto"].tolist(), key=f"select_{pedido_id}")
+        qty = c2.number_input("Cantidad", min_value=1, value=1, step=1, key=f"qty_{pedido_id}")
+        if st.button("Agregar al pedido", key=f"add_{pedido_id}"):
+            add_line_to_order(pedido_id, product_name, qty)
+            st.rerun()
 
-    m1, m2 = st.columns(2)
-    m1.metric("Para mi paga", pesos(totals["profit"]))
-    m2.metric("Diezmo sugerido", pesos(totals["tithing"]))
+    st.divider()
+    st.subheader("Artículos del pedido")
+    lines = get_order_lines(pedido_id, keep_index=True)
 
-    payment_method = st.selectbox("Método de pago", ["Efectivo", "Tarjeta", "Transferencia"])
-    if payment_method == "Tarjeta":
-        st.warning(f"Comisión terminal: {pesos(totals['total'] * CARD_FEE_RATE)}")
+    if lines.empty:
+        st.info("Este pedido todavía no tiene artículos.")
+    else:
+        for original_idx, item in lines.iterrows():
+            c1, c2, c3 = st.columns([3, 1, 1])
+            c1.write(f"**{item['producto']}** x {int(to_float(item['cantidad']))}")
+            c2.write(pesos(item["total_linea"]))
+            if c3.button("Quitar", key=f"remove_line_{pedido_id}_{original_idx}"):
+                remove_order_line(original_idx)
+                st.rerun()
 
-    note = st.text_input("Nota", placeholder="Opcional")
-    if st.button("Cobrar y guardar venta"):
-        register_sale(payment_method, note)
+        totals = order_totals(lines)
+        big_total("TOTAL A COBRAR", totals["total"])
+
+        c1, c2 = st.columns(2)
+        c1.metric("Para mi paga", pesos(totals["profit"]))
+        c2.metric("Para Norte Brunch", pesos(totals["norte"]))
+
+        payment_method = st.selectbox("Método de pago", ["Efectivo", "Tarjeta", "Transferencia"], key=f"pay_method_{pedido_id}")
+        if payment_method == "Tarjeta":
+            st.warning(f"Comisión terminal: {pesos(totals['total'] * CARD_FEE_RATE)}")
+
+        note = st.text_input("Nota", placeholder="Opcional", key=f"note_{pedido_id}")
+
+        if st.button("Cobrar pedido", key=f"pay_{pedido_id}"):
+            pay_order(pedido_id, payment_method, note)
+
+    st.divider()
+    if st.button("Cancelar pedido completo", key=f"cancel_{pedido_id}"):
+        cancel_order(pedido_id)
+        st.success("Pedido cancelado.")
+        st.rerun()
 
 
 def page_gastos():
     st.header("Gastos de Norte Brunch")
+
     with st.form("gasto_form"):
         fecha = selected_datetime_record("gasto_form")
-        categoria = st.selectbox("Categoría", ["insumos", "local", "transporte"])
-        producto_gasto = st.text_input("Producto o gasto", placeholder="Ej. pan, carne, renta, gasolina")
+        producto_gasto = st.text_input("Gasto", placeholder="Ej. pan, carne, renta, gasolina")
         monto = st.number_input("Monto", min_value=0.0, step=10.0)
         pagado_con = st.radio("Pagado con", ["Dinero de Norte Brunch", "Mi dinero personal"], horizontal=False)
         nota = st.text_input("Nota", placeholder="Opcional")
@@ -844,10 +1000,12 @@ def page_gastos():
 
     if guardar:
         if not producto_gasto.strip() or monto <= 0:
-            st.error("Falta producto/gasto o monto.")
+            st.error("Falta gasto o monto.")
             return
 
+        gasto_id = str(uuid.uuid4())
         saldos = get_saldos()
+
         aumenta_deuda = "no"
         if pagado_con == "Dinero de Norte Brunch":
             change_saldo(saldos, "saldo_norte_brunch", -monto)
@@ -862,17 +1020,23 @@ def page_gastos():
         save_saldos(saldos)
 
         append_record("gastos", {
-            **fecha, "gasto_id": str(uuid.uuid4()), "categoria": categoria,
-            "producto_gasto": producto_gasto.strip(), "monto": monto,
-            "pagado_con": pagado_con, "aumenta_deuda": aumenta_deuda, "nota": nota,
+            **fecha,
+            "gasto_id": gasto_id,
+            "producto_gasto": producto_gasto.strip(),
+            "monto": monto,
+            "pagado_con": pagado_con,
+            "aumenta_deuda": aumenta_deuda,
+            "nota": nota,
         })
 
         if aumenta_deuda == "si":
             append_record("deuda_movimientos", {
-                **fecha, "movimiento_id": str(uuid.uuid4()),
+                **fecha,
+                "movimiento_id": str(uuid.uuid4()),
                 "tipo": "aumento por gasto pagado por mí",
-                "monto": monto, "deuda_resultante": saldos["deuda_norte_a_mi"],
-                "nota": f"{categoria}: {producto_gasto.strip()}",
+                "monto": monto,
+                "deuda_resultante": saldos["deuda_norte_a_mi"],
+                "nota": producto_gasto.strip(),
             })
 
         st.success("Gasto guardado.")
@@ -887,6 +1051,7 @@ def page_gastos():
 
 def page_saldos():
     st.header("Saldo y deuda")
+
     saldos = get_saldos()
 
     alert, reason = can_alert_debt_payment()
@@ -898,13 +1063,43 @@ def page_saldos():
 
     c1, c2 = st.columns(2)
     c1.metric("Saldo Norte Brunch", pesos(saldos["saldo_norte_brunch"]))
-    c2.metric("Deuda hacia mí", pesos(saldos["deuda_norte_a_mi"]))
-
-    c3, c4 = st.columns(2)
-    c3.metric("Mi paga pendiente", pesos(saldos["ganancia_personal_pendiente"]))
-    c4.metric("Mi paga pagada", pesos(saldos["ganancia_personal_pagada"]))
+    c2.metric("Mi paga pendiente", pesos(saldos["ganancia_personal_pendiente"]))
 
     st.divider()
+    st.subheader("Balance operativo")
+    st.caption("Ventas contra gastos del negocio. No incluye la deuda de Norte Brunch hacia ti.")
+
+    b1, b2 = st.columns(2)
+    b1.metric("Ventas netas acumuladas", pesos(saldos["ventas_totales_netas"]))
+    b2.metric("Gastos del negocio", pesos(saldos["total_gastos_negocio"]))
+
+    balance_operativo = saldos["ventas_totales_netas"] - saldos["total_gastos_negocio"]
+    st.metric("Balance ventas - gastos", pesos(balance_operativo))
+
+    st.divider()
+    st.subheader("Balance de deuda hacia mí")
+    st.caption("Aquí solo se maneja deuda y pagos de deuda. No se mezclan pagos de ganancia personal.")
+
+    debt_df = load_df("deuda_movimientos")
+    if not debt_df.empty:
+        debt_df["monto"] = pd.to_numeric(debt_df["monto"], errors="coerce").fillna(0.0)
+        pagos_deuda = debt_df[debt_df["tipo"].astype(str).str.lower().str.contains("pago")]["monto"].sum()
+        aumentos_deuda = debt_df[~debt_df["tipo"].astype(str).str.lower().str.contains("pago")]["monto"].sum()
+    else:
+        pagos_deuda = 0
+        aumentos_deuda = 0
+
+    d1, d2 = st.columns(2)
+    d1.metric("Deuda actual", pesos(saldos["deuda_norte_a_mi"]))
+    d2.metric("Pagos de deuda hacia mí", pesos(pagos_deuda))
+
+    d3, d4 = st.columns(2)
+    d3.metric("Aumentos de deuda", pesos(aumentos_deuda))
+    d4.metric("Deuda restante", pesos(saldos["deuda_norte_a_mi"]))
+
+    st.divider()
+    st.subheader("Ajustes manuales")
+
     tab1, tab2, tab3 = st.tabs(["Ajustar saldo", "Ajustar deuda", "Pagar deuda"])
 
     with tab1:
@@ -935,26 +1130,15 @@ def page_saldos():
             st.success("Abono registrado.")
             st.rerun()
 
-    st.divider()
-    st.subheader("Totales acumulados")
-    a1, a2 = st.columns(2)
-    a1.metric("Ventas brutas", pesos(saldos["ventas_totales_brutas"]))
-    a2.metric("Ventas netas", pesos(saldos["ventas_totales_netas"]))
-    a3, a4 = st.columns(2)
-    a3.metric("Para Norte Brunch", pesos(saldos["total_para_norte"]))
-    a4.metric("Comisiones", pesos(saldos["total_comisiones_terminal"]))
+    with st.expander("Ver movimientos de deuda"):
+        st.dataframe(debt_df, use_container_width=True)
 
 
 def page_pago_personal():
     st.header("Pago personal semanal")
+
     saldos = get_saldos()
     st.metric("Mi paga pendiente", pesos(saldos["ganancia_personal_pendiente"]))
-
-    diezmo = round(saldos["ganancia_personal_pendiente"] * TITHING_RATE, 2)
-    libre = round(saldos["ganancia_personal_pendiente"] - diezmo, 2)
-    c1, c2 = st.columns(2)
-    c1.metric("Diezmo sugerido", pesos(diezmo))
-    c2.metric("Pago libre estimado", pesos(libre))
 
     if is_saturday_after_6pm():
         st.success("Ya es sábado después de las 6:00 pm. Puedes hacer tu corte semanal.")
@@ -972,31 +1156,40 @@ def page_pago_personal():
         st.error("Norte Brunch no tiene saldo suficiente para pagarte toda tu paga pendiente.")
         permitido = False
 
-    if st.button("Registrar mi pago semanal", disabled=not permitido):
+    with st.expander("Realizar pago personal"):
         amount = saldos["ganancia_personal_pendiente"]
         diezmo = round(amount * TITHING_RATE, 2)
         libre = round(amount - diezmo, 2)
+        st.write(f"Pago bruto: **{pesos(amount)}**")
+        st.write(f"Diezmo sugerido de este pago: **{pesos(diezmo)}**")
+        st.write(f"Pago libre estimado: **{pesos(libre)}**")
 
-        change_saldo(saldos, "saldo_norte_brunch", -amount)
-        change_saldo(saldos, "ganancia_personal_pendiente", -amount)
-        change_saldo(saldos, "ganancia_personal_pagada", amount)
-        change_saldo(saldos, "diezmo_sugerido_pagado", diezmo)
-        mark_saldo_movement(saldos)
-        save_saldos(saldos)
+        confirmar = st.checkbox("Confirmo que deseo registrar mi pago personal", disabled=not permitido)
 
-        append_record("pagos_personales", {
-            **now_record(), "pago_id": str(uuid.uuid4()),
-            "monto_pago_bruto": amount, "diezmo_sugerido": diezmo,
-            "pago_libre_estimado": libre, "nota": "Pago personal semanal",
-        })
+        if st.button("Registrar mi pago semanal", disabled=(not permitido or not confirmar)):
+            change_saldo(saldos, "saldo_norte_brunch", -amount)
+            change_saldo(saldos, "ganancia_personal_pendiente", -amount)
+            change_saldo(saldos, "ganancia_personal_pagada", amount)
+            mark_saldo_movement(saldos)
+            save_saldos(saldos)
 
-        big_paid("PAGO PERSONAL REGISTRADO", amount)
-        st.success(f"Diezmo sugerido de este pago: {pesos(diezmo)}. Libre estimado: {pesos(libre)}.")
-        st.rerun()
+            append_record("pagos_personales", {
+                **now_record(),
+                "pago_id": str(uuid.uuid4()),
+                "monto_pago_bruto": amount,
+                "diezmo_sugerido": diezmo,
+                "pago_libre_estimado": libre,
+                "nota": "Pago personal semanal",
+            })
+
+            big_paid("PAGO PERSONAL REGISTRADO", amount)
+            st.success(f"Diezmo sugerido de este pago: {pesos(diezmo)}. Libre estimado: {pesos(libre)}.")
+            st.rerun()
 
 
 def page_productos():
     st.header("Productos")
+
     df = load_products(active_only=False)
     st.dataframe(df, use_container_width=True)
 
@@ -1005,7 +1198,10 @@ def page_productos():
     selected = st.selectbox("Producto", productos)
 
     if selected == "Nuevo producto":
-        default_name, default_price, default_profit, default_active = "", 0.0, 0.0, "si"
+        default_name = ""
+        default_price = 0.0
+        default_profit = 0.0
+        default_active = "si"
     else:
         row = df[df["producto"] == selected].iloc[0]
         default_name = row["producto"]
@@ -1026,7 +1222,13 @@ def page_productos():
             return
 
         df = load_products(active_only=False)
-        record = {"producto": name.strip(), "precio": price, "ganancia_personal": profit, "activo": active}
+        record = {
+            "producto": name.strip(),
+            "precio": price,
+            "ganancia_personal": profit,
+            "activo": active,
+        }
+
         if selected != "Nuevo producto" and selected in df["producto"].tolist():
             df.loc[df["producto"] == selected, ["producto", "precio", "ganancia_personal", "activo"]] = [
                 record["producto"], record["precio"], record["ganancia_personal"], record["activo"]
@@ -1045,6 +1247,7 @@ def page_productos():
 
 def page_reportes():
     st.header("Reportes")
+
     start, end = period_picker("reportes")
     ventas = filter_by_period(ventas_df(), start, end)
     gastos = filter_by_period(gastos_df(), start, end)
@@ -1052,7 +1255,6 @@ def page_reportes():
     ventas_brutas = ventas["total_linea"].sum() if not ventas.empty else 0
     ventas_netas = ventas["total_neto_linea"].sum() if not ventas.empty else 0
     mi_paga = ventas["ganancia_personal_linea"].sum() if not ventas.empty else 0
-    diezmo = ventas["diezmo_sugerido_linea"].sum() if not ventas.empty else 0
     norte = ventas["dinero_norte_linea"].sum() if not ventas.empty else 0
     gastos_total = gastos["monto"].sum() if not gastos.empty else 0
     balance_periodo = ventas_netas - gastos_total
@@ -1060,14 +1262,16 @@ def page_reportes():
     c1, c2 = st.columns(2)
     c1.metric("Ventas brutas", pesos(ventas_brutas))
     c2.metric("Ventas netas", pesos(ventas_netas))
+
     c3, c4 = st.columns(2)
     c3.metric("Mi paga generada", pesos(mi_paga))
-    c4.metric("Diezmo sugerido", pesos(diezmo))
+    c4.metric("Para Norte Brunch", pesos(norte))
+
     c5, c6 = st.columns(2)
-    c5.metric("Para Norte Brunch", pesos(norte))
-    c6.metric("Gastos", pesos(gastos_total))
-    st.metric("Balance operativo del periodo", pesos(balance_periodo))
-    st.caption("La deuda hacia ti no se incluye en el balance diario/semanal/mensual. Se maneja aparte en Saldo y deuda.")
+    c5.metric("Gastos", pesos(gastos_total))
+    c6.metric("Balance ventas - gastos", pesos(balance_periodo))
+
+    st.caption("La deuda hacia ti no se incluye en este balance. Tus pagos de deuda aparecen aparte en Saldo y deuda.")
 
     if not ventas.empty:
         st.subheader("Productos vendidos")
@@ -1119,7 +1323,7 @@ def main():
 
     try:
         setup_workbook()
-    except Exception:
+    except Exception as error:
         st.error("No se pudo conectar con Google Sheets. Revisa permisos, Secrets o cuota.")
         st.stop()
 
@@ -1129,10 +1333,17 @@ def main():
 
     page = st.sidebar.radio(
         "Menú",
-        ["Venta", "Gastos", "Saldo y deuda", "Pago personal", "Productos", "Reportes"],
+        [
+            "Pedidos",
+            "Gastos",
+            "Saldo y deuda",
+            "Pago personal",
+            "Productos",
+            "Reportes",
+        ],
     )
 
-    if page == "Venta":
+    if page == "Pedidos":
         page_venta()
     elif page == "Gastos":
         page_gastos()
