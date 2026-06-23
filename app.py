@@ -340,9 +340,46 @@ def get_workbook():
     client = get_client()
 
     spreadsheet_id = st.secrets.get("spreadsheet_id", "")
+
+    # Compatibilidad con distintas formas de guardar el ID.
+    # La app anterior usaba [google_sheet] spreadsheet_id.
     if not spreadsheet_id:
-        st.error("Falta `spreadsheet_id` en Streamlit Secrets.")
+        spreadsheet_id = st.secrets.get("google_sheet", {}).get("spreadsheet_id", "")
+
+    # También aceptamos spreadsheet_id dentro de [app] por si se pegó ahí por error.
+    if not spreadsheet_id:
+        spreadsheet_id = st.secrets.get("app", {}).get("spreadsheet_id", "")
+
+    if not spreadsheet_id:
+        st.error(
+            "Falta `spreadsheet_id` en Streamlit Secrets. "
+            "Puedes dejarlo como antes en [google_sheet], o ponerlo hasta arriba."
+        )
+        with st.expander("Ejemplo correcto de Secrets"):
+            st.code(
+                """[google_sheet]
+spreadsheet_id = "PEGA_AQUI_EL_ID_DE_TU_GOOGLE_SHEET"
+
+[app]
+password = "TU_CONTRASEÑA"
+
+[gcp_service_account]
+type = "service_account"
+project_id = "..."
+private_key_id = "..."
+private_key = "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n"
+client_email = "..."
+client_id = "..."
+auth_uri = "https://accounts.google.com/o/oauth2/auth"
+token_uri = "https://oauth2.googleapis.com/token"
+auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+client_x509_cert_url = "..."
+universe_domain = "googleapis.com" """,
+                language="toml",
+            )
         st.stop()
+
+    spreadsheet_id = str(spreadsheet_id).strip()
 
     return client.open_by_key(spreadsheet_id)
 
