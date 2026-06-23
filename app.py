@@ -1,663 +1,277 @@
-import uuid
+
 import base64
 import time
-import random
-from datetime import datetime, date, timedelta, time as dt_time
-from zoneinfo import ZoneInfo
+import uuid
+from datetime import datetime, date, time as dtime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
+import gspread
 import pandas as pd
 import streamlit as st
-import gspread
+from google.oauth2.service_account import Credentials
 from gspread.exceptions import APIError
-from google.oauth2 import service_account
 
 
-APP_TITLE = "Norte Brunch Finanzas"
+APP_TITLE = "Norte Brunch"
 TIMEZONE = ZoneInfo("America/Mexico_City")
-TITHING_RATE = 0.10
 CARD_FEE_RATE = 0.035
-MIN_INVESTMENT_REPAYMENT_ALERT = 10000
+TITHING_RATE = 0.10
+DEBT_PAYMENT_ALERT_AMOUNT = 10000
 
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
+
+DEFAULT_PRODUCTS = [
+    ["Torta de adobada", 95, 40, "si"],
+    ["Torta de pierna", 100, 40, "si"],
+    ["Torta mixta", 125, 40, "si"],
+    ["Extra aguacate", 15, 0, "si"],
+    ["Extra queso", 10, 0, "si"],
+    ["Agua de litro", 45, 25, "si"],
+    ["Agua de medio litro", 30, 20, "si"],
+    ["Refresco 600 ml", 35, 10, "si"],
+    ["Pastel", 45, 20, "si"],
+    ["Cafe", 20, 10, "si"],
 ]
-
 
 SHEETS = {
     "productos": {
         "name": "Productos",
         "headers": ["producto", "precio", "ganancia_personal", "activo"],
-        "default_rows": [
-            ["Torta de adobada", 95, 40, "si"],
-            ["Torta de pierna", 100, 40, "si"],
-            ["Torta mixta", 125, 40, "si"],
-            ["Pastel", 45, 15, "si"],
-            ["Cafe", 20, 10, "si"],
-            ["Refresco", 30, 10, "si"],
-            ["Agua de litro", 45, 25, "si"],
-            ["Agua de medio litro", 30, 20, "si"],
-            ["Extra aguacate", 15, 0, "si"],
-            ["Extra queso", 15, 0, "si"],
-        ],
-    },
-    "pedidos": {
-        "name": "Pedidos",
-        "headers": [
-            "fecha_hora",
-            "fecha",
-            "hora",
-            "pedido_id",
-            "pedido_numero",
-            "estado",
-            "producto",
-            "cantidad",
-            "precio_unitario",
-            "ganancia_personal_unitaria",
-            "total_linea",
-            "ganancia_personal_linea",
-            "dinero_norte_linea",
-            "diezmo_linea",
-            "nota",
-        ],
-        "default_rows": [],
+        "default_rows": DEFAULT_PRODUCTS,
     },
     "ventas": {
         "name": "Ventas",
         "headers": [
-            "fecha_hora",
-            "fecha",
-            "hora",
-            "pedido_id",
-            "pedido_numero",
-            "producto",
-            "cantidad",
-            "precio_unitario",
-            "ganancia_personal_unitaria",
-            "total_linea",
-            "ganancia_personal_linea",
-            "dinero_norte_linea",
-            "diezmo_linea",
-            "metodo_pago",
-            "monto_efectivo_linea",
-            "monto_tarjeta_linea",
-            "monto_transferencia_linea",
-            "comision_terminal_linea",
-            "total_neto_linea",
-            "nota",
+            "fecha_hora", "fecha", "hora", "venta_id", "producto", "cantidad",
+            "precio_unitario", "ganancia_personal_unitaria", "total_linea",
+            "ganancia_personal_linea", "diezmo_sugerido_linea",
+            "dinero_norte_linea", "metodo_pago", "comision_terminal_linea",
+            "total_neto_linea", "nota",
         ],
         "default_rows": [],
     },
-    "gastos_local": {
-        "name": "Gastos_Local",
+    "gastos": {
+        "name": "Gastos",
         "headers": [
-            "fecha_hora",
-            "fecha",
-            "hora",
-            "tipo_movimiento",
-            "nombre",
-            "categoria",
-            "cantidad",
-            "unidad",
-            "costo_total",
-            "pagado_por",
-            "nota",
+            "fecha_hora", "fecha", "hora", "gasto_id", "categoria", "producto_gasto",
+            "monto", "pagado_con", "aumenta_deuda", "nota",
         ],
         "default_rows": [],
     },
-    "gastos_familiares": {
-        "name": "Gastos_Familiares",
+    "pagos_personales": {
+        "name": "Pagos_Personales",
         "headers": [
-            "fecha_hora",
-            "fecha",
-            "hora",
-            "tipo",
-            "categoria",
-            "producto",
-            "monto",
-            "metodo_pago",
-            "nota",
+            "fecha_hora", "fecha", "hora", "pago_id", "monto_pago_bruto",
+            "diezmo_sugerido", "pago_libre_estimado", "nota",
         ],
         "default_rows": [],
     },
-    "inventario": {
-        "name": "Inventario",
-        "headers": ["insumo", "cantidad", "unidad"],
-        "default_rows": [],
-    },
-    "recetas": {
-        "name": "Recetas",
+    "deuda_movimientos": {
+        "name": "Deuda_Movimientos",
         "headers": [
-            "producto",
-            "insumo",
-            "cantidad_por_producto",
-            "unidad",
-            "costo_unitario",
-            "activo",
+            "fecha_hora", "fecha", "hora", "movimiento_id", "tipo", "monto",
+            "deuda_resultante", "nota",
         ],
-        "default_rows": [
-            ["Torta de adobada", "pan", 1, "pieza", 8, "si"],
-            ["Torta de adobada", "carne adobada", 0.15, "kg", 95, "si"],
-            ["Torta de adobada", "aguacate", 0.08, "kg", 60, "si"],
-            ["Torta de pierna", "pan", 1, "pieza", 8, "si"],
-            ["Torta de pierna", "pierna", 0.15, "kg", 95, "si"],
-            ["Torta de pierna", "aguacate", 0.08, "kg", 60, "si"],
-            ["Torta mixta", "pan", 1, "pieza", 8, "si"],
-            ["Torta mixta", "carne adobada", 0.075, "kg", 95, "si"],
-            ["Torta mixta", "pierna", 0.075, "kg", 95, "si"],
-            ["Torta mixta", "aguacate", 0.08, "kg", 60, "si"],
-            ["Pastel", "rebanada de pastel", 1, "pieza", 27, "si"],
-            ["Cafe", "cafe preparado", 1, "pieza", 10, "si"],
-            ["Refresco", "refresco 600 ml", 1, "pieza", 20, "si"],
-            ["Agua de litro", "agua 1 litro", 1, "pieza", 20, "si"],
-            ["Agua de medio litro", "agua 500 ml", 1, "pieza", 10, "si"],
-            ["Extra aguacate", "aguacate", 0.08, "kg", 60, "si"],
-            ["Extra queso", "queso", 0.04, "kg", 120, "si"],
+        "default_rows": [],
+    },
+    "ajustes_saldo": {
+        "name": "Ajustes_Saldo",
+        "headers": [
+            "fecha_hora", "fecha", "hora", "ajuste_id", "tipo", "monto",
+            "saldo_resultante", "nota",
         ],
+        "default_rows": [],
     },
     "saldos": {
         "name": "Saldos",
-        "headers": ["cuenta", "monto"],
+        "headers": ["clave", "valor"],
         "default_rows": [
-            ["dinero_norte_brunch", 0],
-            ["ganancia_pendiente_personal", 0],
-            ["ganancia_pagada_personal", 0],
-            ["total_gastos_negocio", 0],
-            ["gastos_pagados_norte", 0],
-            ["gastos_pagados_personal", 0],
-            ["inversion_inicial_personal", 0],
-            ["inversion_personal_total", 0],
-            ["deuda_inversion_personal", 0],
-            ["inversion_pagada_personal", 0],
-            ["dinero_familiar", 0],
-            ["ingresos_familiares_totales", 0],
-            ["gastos_familiares_totales", 0],
-            ["diezmo_pendiente", 0],
-            ["diezmo_pagado", 0],
+            ["saldo_norte_brunch", 0],
+            ["deuda_norte_a_mi", 0],
+            ["ganancia_personal_pendiente", 0],
+            ["ganancia_personal_pagada", 0],
+            ["diezmo_sugerido_total", 0],
+            ["diezmo_sugerido_pagado", 0],
             ["ventas_totales_brutas", 0],
             ["ventas_totales_netas", 0],
             ["total_para_norte", 0],
-            ["total_para_paga_personal", 0],
-            ["total_para_diezmo", 0],
+            ["total_gastos_negocio", 0],
+            ["gastos_pagados_norte", 0],
+            ["gastos_pagados_personal", 0],
             ["total_comisiones_terminal", 0],
+            ["ultimo_movimiento_saldo", ""],
         ],
-    },
-    "diezmos": {
-        "name": "Diezmos",
-        "headers": ["fecha_hora", "fecha", "hora", "monto", "frecuencia", "nota"],
-        "default_rows": [],
-    },
-    "inversiones": {
-        "name": "Inversiones",
-        "headers": ["fecha_hora", "fecha", "hora", "tipo", "monto", "nota"],
-        "default_rows": [],
-    },
-    "categorias_local": {
-        "name": "Categorias_Local",
-        "headers": ["categoria", "activo"],
-        "default_rows": [
-            ["insumos", "si"],
-            ["local", "si"],
-            ["transporte", "si"],
-        ],
-    },
-    "categorias_familia": {
-        "name": "Categorias_Familia",
-        "headers": ["categoria", "activo"],
-        "default_rows": [
-            ["hogar", "si"],
-        ],
-    },
-    "config": {
-        "name": "Config",
-        "headers": ["clave", "valor"],
-        "default_rows": [["frecuencia_diezmo", "mensual"], ["frecuencia_pago_personal", "semanal"]],
     },
 }
 
-
-REQUIRED_PRODUCT_PRICES = {
-    "Torta mixta": {"precio": 125, "ganancia_personal": 40},
-    "Agua de litro": {"precio": 45, "ganancia_personal": 25},
-    "Agua de medio litro": {"precio": 30, "ganancia_personal": 20},
-}
-
-
-def is_torta(product_name):
-    """Regla fuerte: cualquier producto que contenga 'torta' cuenta como torta."""
-    return "torta" in str(product_name).strip().lower()
-
-
-def get_personal_profit_unit(product_name, stored_profit=0):
-    """Ganancia personal por unidad.
-
-    Regla de Wilson:
-    - Toda torta deja $40 de ganancia personal, sin importar cuál elija el cliente.
-    - Otros productos usan la ganancia guardada en Productos.
-    """
-    if is_torta(product_name):
-        return 40.0
-    return to_float(stored_profit)
-
-
-def calculate_line_financials(product_name, quantity, unit_price, stored_profit=0, card_fee_line=0):
-    """Calcula una línea de venta con la lógica correcta."""
-    quantity = to_float(quantity)
-    unit_price = to_float(unit_price)
-    card_fee_line = to_float(card_fee_line)
-
-    unit_profit = get_personal_profit_unit(product_name, stored_profit)
-    total_line = round(quantity * unit_price, 2)
-    personal_profit_line = round(quantity * unit_profit, 2)
-    tithing_line = round(personal_profit_line * TITHING_RATE, 2)
-    norte_line = round(total_line - personal_profit_line - card_fee_line, 2)
-    net_line = round(total_line - card_fee_line, 2)
-
-    return {
-        "unit_profit": unit_profit,
-        "total_line": total_line,
-        "personal_profit_line": personal_profit_line,
-        "tithing_line": tithing_line,
-        "norte_line": norte_line,
-        "net_line": net_line,
-    }
-
-
-# -----------------------------
-# GOOGLE SHEETS
-# -----------------------------
-
-@st.cache_resource
-def get_spreadsheet():
-    creds = service_account.Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=SCOPES,
-    )
-    client = gspread.authorize(creds)
-    return client.open_by_key(st.secrets["google_sheet"]["spreadsheet_id"])
-
-
-def google_call(func, *args, **kwargs):
-    """Ejecuta llamadas a Google Sheets con reintentos para evitar fallas por cuota o red."""
-    last_error = None
-
-    for attempt in range(5):
-        try:
-            return func(*args, **kwargs)
-        except APIError as error:
-            last_error = error
-            wait_time = min(2 ** attempt, 16)
-            time.sleep(wait_time)
-        except Exception as error:
-            last_error = error
-            wait_time = min(2 ** attempt, 8)
-            time.sleep(wait_time)
-
-    raise last_error
-
-
-def get_worksheet_map():
-    spreadsheet = get_spreadsheet()
-    worksheets = google_call(spreadsheet.worksheets)
-    return {ws.title: ws for ws in worksheets}
-
-
-def get_ws(sheet_key):
-    spreadsheet = get_spreadsheet()
-    sheet_info = SHEETS[sheet_key]
-    worksheet_map = get_worksheet_map()
-    worksheet = worksheet_map.get(sheet_info["name"])
-
-    if worksheet is None:
-        worksheet = google_call(
-            spreadsheet.add_worksheet,
-            title=sheet_info["name"],
-            rows=1000,
-            cols=max(30, len(sheet_info["headers"]) + 5),
-        )
-        worksheet_map[sheet_info["name"]] = worksheet
-        google_call(worksheet.append_row, sheet_info["headers"], value_input_option="USER_ENTERED")
-        if sheet_info["default_rows"]:
-            google_call(worksheet.append_rows, sheet_info["default_rows"], value_input_option="USER_ENTERED")
-
-    return worksheet
-
-
-def get_actual_headers(sheet_key):
-    ws = get_ws(sheet_key)
-    headers = google_call(ws.row_values, 1)
-    return headers if headers else SHEETS[sheet_key]["headers"]
-
-
-@st.cache_resource
-def setup_workbook():
-    """Crea hojas faltantes y agrega columnas nuevas sin borrar datos."""
-    for key, sheet_info in SHEETS.items():
-        ws = get_ws(key)
-        first_row = google_call(ws.row_values, 1)
-
-        if not first_row:
-            google_call(ws.append_row, sheet_info["headers"], value_input_option="USER_ENTERED")
-            if sheet_info["default_rows"]:
-                google_call(ws.append_rows, sheet_info["default_rows"], value_input_option="USER_ENTERED")
-            continue
-
-        missing_headers = [header for header in sheet_info["headers"] if header not in first_row]
-        if missing_headers:
-            start_col = len(first_row) + 1
-            for index, header in enumerate(missing_headers, start=start_col):
-                google_call(ws.update_cell, 1, index, header)
-
-    return True
-
-
-@st.cache_data(ttl=120)
-def load_df(sheet_key):
-    """Carga una hoja con menos riesgo de error que get_all_records."""
-    ws = get_ws(sheet_key)
-    try:
-        values = google_call(ws.get_all_values)
-    except APIError as error:
-        st.error(
-            "Google Sheets no dejó leer la información en este momento. "
-            "Espera 1 minuto y presiona Reboot/Refresh. "
-            "Si sigue pasando, revisa que la hoja esté compartida con el correo del service account."
-        )
-        st.stop()
-    except Exception as error:
-        st.error("No se pudo leer Google Sheets. Revisa conexión, permisos o Secrets.")
-        st.stop()
-
-    if not values:
-        return pd.DataFrame()
-
-    headers = [str(h).strip() for h in values[0]]
-    rows = values[1:]
-
-    cleaned_rows = []
-    for row in rows:
-        padded = row + [""] * (len(headers) - len(row))
-        cleaned_rows.append(padded[:len(headers)])
-
-    return pd.DataFrame(cleaned_rows, columns=headers)
-def clear_data_cache():
-    try:
-        load_df.clear()
-    except Exception:
-        pass
-    try:
-        ensure_required_product_prices.clear()
-    except Exception:
-        pass
-
-
-def append_record(sheet_key, record):
-    """Agrega una fila respetando el orden real de columnas en la hoja."""
-    ws = get_ws(sheet_key)
-    headers = get_actual_headers(sheet_key)
-    row = [record.get(header, "") for header in headers]
-    google_call(ws.append_row, row, value_input_option="USER_ENTERED")
-    clear_data_cache()
-
-
-def replace_records(sheet_key, records):
-    """Reemplaza datos de una hoja usando encabezados actuales."""
-    ws = get_ws(sheet_key)
-    headers = get_actual_headers(sheet_key)
-
-    google_call(ws.clear)
-    google_call(ws.append_row, headers, value_input_option="USER_ENTERED")
-
-    rows = []
-    for record in records:
-        rows.append([record.get(header, "") for header in headers])
-
-    if rows:
-        google_call(ws.append_rows, rows, value_input_option="USER_ENTERED")
-
-    clear_data_cache()
-
-
-@st.cache_resource
-def ensure_required_product_prices():
-    """Actualiza precios clave que ya definió Wilson, sin tocar otros productos."""
-    df = load_df("productos")
-    if df.empty:
-        return False
-
-    changed = False
-    records = []
-
-    for _, row in df.iterrows():
-        product = str(row.get("producto", "")).strip()
-        record = {
-            "producto": row.get("producto", ""),
-            "precio": row.get("precio", 0),
-            "ganancia_personal": row.get("ganancia_personal", 0),
-            "activo": row.get("activo", "si"),
-        }
-
-        if is_torta(product):
-            if to_float(record["ganancia_personal"]) != 40.0:
-                record["ganancia_personal"] = 40
-                changed = True
-
-        if product in REQUIRED_PRODUCT_PRICES:
-            expected = REQUIRED_PRODUCT_PRICES[product]
-            if to_float(record["precio"]) != float(expected["precio"]):
-                record["precio"] = expected["precio"]
-                changed = True
-            if to_float(record["ganancia_personal"]) != float(expected["ganancia_personal"]):
-                record["ganancia_personal"] = expected["ganancia_personal"]
-                changed = True
-
-        records.append(record)
-
-    if changed:
-        replace_records("productos", records)
-
-    return changed
-
-
-# -----------------------------
-# UTILIDADES
-# -----------------------------
 
 def mx_now():
     return datetime.now(TIMEZONE)
 
 
-def datetime_parts(selected_date, selected_time):
-    dt = datetime.combine(selected_date, selected_time)
+def pesos(value):
+    try:
+        value = float(value)
+    except Exception:
+        value = 0
+    return f"${value:,.2f} MXN"
+
+
+def to_float(value):
+    if value is None:
+        return 0.0
+    text = str(value).replace("$", "").replace(",", "").strip()
+    if text == "":
+        return 0.0
+    try:
+        return float(text)
+    except Exception:
+        return 0.0
+
+
+def now_record():
+    now = mx_now()
     return {
-        "fecha_hora": dt.strftime("%Y-%m-%d %H:%M:%S"),
-        "fecha": selected_date.strftime("%Y-%m-%d"),
-        "hora": selected_time.strftime("%H:%M:%S"),
+        "fecha_hora": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "fecha": now.strftime("%Y-%m-%d"),
+        "hora": now.strftime("%H:%M:%S"),
     }
 
 
-def datetime_inputs(prefix, label="Fecha y hora"):
+def selected_datetime_record(prefix):
+    today = mx_now().date()
+    now_t = mx_now().time().replace(second=0, microsecond=0)
+    c1, c2 = st.columns(2)
+    selected_date = c1.date_input("Fecha", value=today, key=f"{prefix}_fecha")
+    selected_time = c2.time_input("Hora", value=now_t, key=f"{prefix}_hora")
+    dt = datetime.combine(selected_date, selected_time).replace(tzinfo=TIMEZONE)
+    return {
+        "fecha_hora": dt.strftime("%Y-%m-%d %H:%M:%S"),
+        "fecha": dt.strftime("%Y-%m-%d"),
+        "hora": dt.strftime("%H:%M:%S"),
+    }
+
+
+def is_saturday_after_6pm():
     now = mx_now()
-    st.write(f"**{label}**")
-    col1, col2 = st.columns(2)
-    selected_date = col1.date_input("Fecha", value=now.date(), key=f"{prefix}_fecha")
-    selected_time = col2.time_input(
-        "Hora",
-        value=now.time().replace(microsecond=0),
-        step=60,
-        key=f"{prefix}_hora",
-    )
-    return datetime_parts(selected_date, selected_time)
+    return now.weekday() == 5 and now.time() >= dtime(18, 0)
 
 
-def pesos(value):
-    try:
-        return f"${float(value):,.2f}"
-    except (TypeError, ValueError):
-        return "$0.00"
+def next_saturday_6pm():
+    now = mx_now()
+    days_ahead = (5 - now.weekday()) % 7
+    candidate = datetime.combine(now.date() + timedelta(days=days_ahead), dtime(18, 0), tzinfo=TIMEZONE)
+    if candidate <= now:
+        candidate += timedelta(days=7)
+    return candidate
 
 
-def apply_branding():
+def apply_mobile_style():
     st.markdown(
         """
         <style>
-        :root {
-            --nb-red: #b42318;
-            --nb-dark: #2b1b12;
-            --nb-cream: #fff4df;
-            --nb-gold: #d8952f;
-            --nb-green: #157347;
+        .block-container {
+            padding-top: 1rem;
+            padding-left: .8rem;
+            padding-right: .8rem;
+            max-width: 760px;
         }
 
-        .stApp {
-            background: linear-gradient(180deg, #fff8ea 0%, #fff4df 45%, #ffffff 100%);
+        .nb-logo-wrap {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: .25rem;
         }
 
-        .nb-hero {
-            background: linear-gradient(135deg, #2b1b12 0%, #5a2b18 55%, #b42318 100%);
-            border-radius: 22px;
-            padding: 22px 24px;
-            margin-bottom: 18px;
-            box-shadow: 0 8px 22px rgba(43, 27, 18, 0.18);
-            color: white;
-            border: 2px solid #d8952f;
+        .nb-logo-wrap img {
+            max-width: 230px;
+            width: min(65vw, 230px);
+            height: auto;
+            display: block;
+            margin: 0 auto;
         }
 
         .nb-title {
-            font-size: 2.2rem;
+            text-align: center;
             font-weight: 900;
-            letter-spacing: 1px;
-            margin-bottom: 4px;
+            font-size: 1.55rem;
+            margin-bottom: .1rem;
+            color: #1F2933;
         }
 
         .nb-subtitle {
-            font-size: 1rem;
-            color: #ffe8b8;
-        }
-
-        .nb-total-red {
-            background: #fff1f0;
-            border: 3px solid #b42318;
-            color: #b42318;
-            border-radius: 18px;
-            padding: 18px;
             text-align: center;
-            font-weight: 900;
-            font-size: 2.35rem;
-            margin: 14px 0;
-            box-shadow: 0 5px 14px rgba(180, 35, 24, 0.18);
-        }
-
-        .nb-total-green {
-            background: #eafaf1;
-            border: 3px solid #157347;
-            color: #157347;
-            border-radius: 18px;
-            padding: 18px;
-            text-align: center;
-            font-weight: 900;
-            font-size: 2.15rem;
-            margin: 14px 0;
-            box-shadow: 0 5px 14px rgba(21, 115, 71, 0.16);
-        }
-
-        .nb-warning-card {
-            background: #fff7e6;
-            border-left: 8px solid #d8952f;
-            border-radius: 14px;
-            padding: 16px;
-            margin: 12px 0;
-        }
-
-        div.stButton > button {
-            border-radius: 14px;
             font-weight: 700;
+            font-size: .84rem;
+            color: #6B4E2E;
+            margin-bottom: .8rem;
         }
 
-        /* Corrección de contraste: fondo claro + letras oscuras */
-        .stApp,
-        .stApp p,
-        .stApp div,
-        .stApp span,
-        .stApp label,
-        .stApp h1,
-        .stApp h2,
-        .stApp h3,
-        .stApp h4,
-        .stApp h5,
-        .stApp h6 {
-            color: #1F2933 !important;
+        .nb-total {
+            border: 2px solid #D32F2F;
+            border-radius: 18px;
+            padding: .95rem;
+            margin: .85rem 0;
+            text-align: center;
+            background: #FFF8F8;
         }
 
-        [data-testid="stMarkdownContainer"] p,
-        [data-testid="stMarkdownContainer"] li,
-        [data-testid="stMarkdownContainer"] span {
-            color: #1F2933 !important;
+        .nb-total .label {
+            font-weight: 900;
+            font-size: .9rem;
+            color: #4B5563;
         }
 
-        [data-testid="stMetric"] label,
-        [data-testid="stMetricValue"],
-        [data-testid="stMetricDelta"] {
-            color: #1F2933 !important;
+        .nb-total .amount {
+            font-weight: 1000;
+            font-size: 2.45rem;
+            line-height: 1;
+            color: #D32F2F;
         }
 
-        [data-testid="stSidebar"],
-        [data-testid="stSidebar"] p,
-        [data-testid="stSidebar"] div,
-        [data-testid="stSidebar"] span,
-        [data-testid="stSidebar"] label {
-            color: #1F2933 !important;
+        .nb-paid {
+            border: 2px solid #2E7D32;
+            border-radius: 18px;
+            padding: .95rem;
+            margin: .85rem 0;
+            text-align: center;
+            background: #F1FFF3;
         }
 
-        input,
-        textarea,
-        [data-baseweb="input"] input,
-        [data-baseweb="textarea"] textarea {
-            color: #111827 !important;
-            background-color: #FFFFFF !important;
+        .nb-paid .label {
+            font-weight: 900;
+            font-size: .9rem;
+            color: #1F2933;
         }
 
-        [data-baseweb="select"] div,
-        [data-baseweb="select"] span {
-            color: #111827 !important;
+        .nb-paid .amount {
+            font-weight: 1000;
+            font-size: 2.25rem;
+            line-height: 1;
+            color: #2E7D32;
         }
 
         .stButton > button {
-            color: #FFFFFF !important;
-            background-color: #D8891E;
-            border-radius: 10px;
-            font-weight: 800;
+            min-height: 3rem;
+            border-radius: 14px;
+            font-weight: 850;
+            width: 100%;
         }
 
-        .stButton > button p,
-        .stButton > button div,
-        .stButton > button span {
-            color: #FFFFFF !important;
+        div[data-testid="stMetric"] {
+            border: 1px solid #E5E7EB;
+            border-radius: 14px;
+            padding: .7rem;
+            background: #FFFFFF;
         }
 
-        .nb-subtitle {
-            color: #3A2A1A !important;
+        label, p, div, span {
+            color: #1F2933;
         }
 
-        .nb-total-red,
-        .nb-total-red div,
-        .nb-total-red span {
-            color: #1F2933 !important;
-        }
-
-        .nb-total-red .amount {
-            color: #D32F2F !important;
-        }
-
-        .nb-total-green,
-        .nb-total-green div,
-        .nb-total-green span {
-            color: #1F2933 !important;
-        }
-
-        .nb-total-green .amount {
-            color: #2E7D32 !important;
+        input, textarea {
+            color: #111827 !important;
         }
         </style>
         """,
@@ -665,127 +279,172 @@ def apply_branding():
     )
 
 
-def render_brand_header():
+def render_header():
     logo_path = Path("logo.png")
+    if logo_path.exists():
+        b64 = base64.b64encode(logo_path.read_bytes()).decode("utf-8")
+        st.markdown(
+            f'<div class="nb-logo-wrap"><img src="data:image/png;base64,{b64}" alt="Norte Brunch"></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown('<div class="nb-title">Norte Brunch</div>', unsafe_allow_html=True)
+    st.markdown('<div class="nb-subtitle">Control simple del negocio</div>', unsafe_allow_html=True)
 
+
+def big_total(label, amount):
     st.markdown(
-        """
-        <div class="nb-hero">
-            <div class="nb-title">🥪 Norte Brunch</div>
-            <div class="nb-subtitle">Sistema privado de ventas, gastos, pagos y recuperación de inversión</div>
+        f"""
+        <div class="nb-total">
+            <div class="label">{label}</div>
+            <div class="amount">{pesos(amount)}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    if logo_path.exists():
-        st.image(str(logo_path), width=140)
-    elif "app" in st.secrets and "logo_url" in st.secrets["app"]:
-        st.image(st.secrets["app"]["logo_url"], width=140)
 
-
-def big_red_amount(label, amount):
+def big_paid(label, amount):
     st.markdown(
-        f'<div class="nb-total-red">{label}<br>{pesos(amount)}</div>',
+        f"""
+        <div class="nb-paid">
+            <div class="label">{label}</div>
+            <div class="amount">{pesos(amount)}</div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
 
-def big_green_amount(label, amount):
-    st.markdown(
-        f'<div class="nb-total-green">{label}<br>{pesos(amount)}</div>',
-        unsafe_allow_html=True,
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+
+
+@st.cache_resource
+def get_client():
+    if "gcp_service_account" not in st.secrets:
+        st.error("Falta configurar [gcp_service_account] en Streamlit Secrets.")
+        st.stop()
+
+    creds = Credentials.from_service_account_info(
+        dict(st.secrets["gcp_service_account"]),
+        scopes=SCOPES,
     )
+    return gspread.authorize(creds)
 
 
-def to_float(value, default=0.0):
+@st.cache_resource
+def get_workbook():
+    client = get_client()
+
+    spreadsheet_id = st.secrets.get("spreadsheet_id", "")
+    if not spreadsheet_id:
+        st.error("Falta `spreadsheet_id` en Streamlit Secrets.")
+        st.stop()
+
+    return client.open_by_key(spreadsheet_id)
+
+
+def google_call(func, *args, **kwargs):
+    last_error = None
+    for attempt in range(5):
+        try:
+            return func(*args, **kwargs)
+        except APIError as error:
+            last_error = error
+            time.sleep(min(2 ** attempt, 16))
+        except Exception as error:
+            last_error = error
+            time.sleep(min(2 ** attempt, 8))
+    raise last_error
+
+
+@st.cache_resource
+def get_ws(sheet_key):
+    workbook = get_workbook()
+    info = SHEETS[sheet_key]
     try:
-        if value is None or value == "":
-            return default
-        return float(value)
-    except (TypeError, ValueError):
-        return default
+        return google_call(workbook.worksheet, info["name"])
+    except Exception:
+        ws = google_call(workbook.add_worksheet, title=info["name"], rows=1000, cols=max(len(info["headers"]) + 4, 12))
+        google_call(ws.append_row, info["headers"], value_input_option="USER_ENTERED")
+        if info["default_rows"]:
+            google_call(ws.append_rows, info["default_rows"], value_input_option="USER_ENTERED")
+        return ws
 
 
-def to_numeric(df, columns):
-    data = df.copy()
-    for col in columns:
-        if col in data.columns:
-            data[col] = pd.to_numeric(data[col], errors="coerce").fillna(0)
-    return data
+def ensure_headers(sheet_key):
+    ws = get_ws(sheet_key)
+    expected = SHEETS[sheet_key]["headers"]
+    values = google_call(ws.get_all_values)
+
+    if not values:
+        google_call(ws.append_row, expected, value_input_option="USER_ENTERED")
+        if SHEETS[sheet_key]["default_rows"]:
+            google_call(ws.append_rows, SHEETS[sheet_key]["default_rows"], value_input_option="USER_ENTERED")
+        return
+
+    current = values[0]
+    changed = False
+    for header in expected:
+        if header not in current:
+            current.append(header)
+            changed = True
+
+    if changed:
+        google_call(ws.update, "1:1", [current])
 
 
-def prepare_datetime(df):
-    data = df.copy()
-    if data.empty:
-        data["dt"] = pd.to_datetime([])
-        return data
-
-    if "fecha_hora" in data.columns:
-        data["dt"] = pd.to_datetime(data["fecha_hora"], errors="coerce")
-    else:
-        data["dt"] = pd.NaT
-
-    if "fecha" in data.columns:
-        missing = data["dt"].isna()
-        data.loc[missing, "dt"] = pd.to_datetime(data.loc[missing, "fecha"], errors="coerce")
-
-    return data
+def setup_workbook():
+    for key in SHEETS:
+        get_ws(key)
+        ensure_headers(key)
 
 
-def weekday_spanish(weekday):
-    names = {
-        "Monday": "Lunes",
-        "Tuesday": "Martes",
-        "Wednesday": "Miércoles",
-        "Thursday": "Jueves",
-        "Friday": "Viernes",
-        "Saturday": "Sábado",
-        "Sunday": "Domingo",
-    }
-    return names.get(weekday, weekday)
+def clear_cache():
+    try:
+        load_df.clear()
+    except Exception:
+        pass
 
 
-def period_filter_ui(prefix):
-    option = st.selectbox(
-        "Periodo",
-        ["Hoy", "Semana", "Mes", "Año", "Todo", "Rango personalizado"],
-        key=f"{prefix}_periodo",
-    )
+@st.cache_data(ttl=120)
+def load_df(sheet_key):
+    ws = get_ws(sheet_key)
+    values = google_call(ws.get_all_values)
+    if not values:
+        return pd.DataFrame(columns=SHEETS[sheet_key]["headers"])
 
-    today = mx_now().date()
-
-    if option == "Hoy":
-        return today, today
-    if option == "Semana":
-        start = today - timedelta(days=today.weekday())
-        return start, today
-    if option == "Mes":
-        return today.replace(day=1), today
-    if option == "Año":
-        return today.replace(month=1, day=1), today
-    if option == "Todo":
-        return date.min, today
-
-    col1, col2 = st.columns(2)
-    start = col1.date_input("Desde", value=today, key=f"{prefix}_desde")
-    end = col2.date_input("Hasta", value=today, key=f"{prefix}_hasta")
-    return start, end
+    headers = [str(h).strip() for h in values[0]]
+    rows = values[1:]
+    cleaned = []
+    for row in rows:
+        padded = row + [""] * (len(headers) - len(row))
+        cleaned.append(padded[:len(headers)])
+    return pd.DataFrame(cleaned, columns=headers)
 
 
-def filter_date_range(df, start_date, end_date):
-    if df.empty:
-        return df
+def append_record(sheet_key, record):
+    ws = get_ws(sheet_key)
+    ensure_headers(sheet_key)
+    headers = google_call(ws.row_values, 1)
+    row = [record.get(h, "") for h in headers]
+    google_call(ws.append_row, row, value_input_option="USER_ENTERED")
+    clear_cache()
 
-    data = prepare_datetime(df)
-    start = pd.Timestamp(start_date)
-    end = pd.Timestamp(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-    return data[(data["dt"] >= start) & (data["dt"] <= end)].copy()
 
+def replace_records(sheet_key, records):
+    ws = get_ws(sheet_key)
+    headers = SHEETS[sheet_key]["headers"]
+    google_call(ws.clear)
+    google_call(ws.append_row, headers, value_input_option="USER_ENTERED")
+    rows = [[record.get(h, "") for h in headers] for record in records]
+    if rows:
+        google_call(ws.append_rows, rows, value_input_option="USER_ENTERED")
+    clear_cache()
 
-# -----------------------------
-# SALDOS, CONFIG Y CATEGORÍAS
-# -----------------------------
 
 def get_saldos():
     df = load_df("saldos")
@@ -793,18 +452,32 @@ def get_saldos():
 
     if not df.empty:
         for _, row in df.iterrows():
-            cuenta = str(row.get("cuenta", "")).strip()
-            if cuenta:
-                saldos[cuenta] = to_float(row.get("monto", 0))
+            key = str(row.get("clave", "")).strip()
+            if key:
+                saldos[key] = row.get("valor", 0)
 
-    for cuenta, monto in SHEETS["saldos"]["default_rows"]:
-        saldos.setdefault(cuenta, float(monto))
+    for row in SHEETS["saldos"]["default_rows"]:
+        saldos.setdefault(row[0], row[1])
 
+    numeric_keys = [
+        "saldo_norte_brunch", "deuda_norte_a_mi", "ganancia_personal_pendiente",
+        "ganancia_personal_pagada", "diezmo_sugerido_total", "diezmo_sugerido_pagado",
+        "ventas_totales_brutas", "ventas_totales_netas", "total_para_norte",
+        "total_gastos_negocio", "gastos_pagados_norte", "gastos_pagados_personal",
+        "total_comisiones_terminal",
+    ]
+
+    for key in numeric_keys:
+        saldos[key] = to_float(saldos.get(key, 0))
+
+    saldos["ultimo_movimiento_saldo"] = str(saldos.get("ultimo_movimiento_saldo", "")).strip()
     return saldos
 
 
 def save_saldos(saldos):
-    records = [{"cuenta": key, "monto": round(float(value), 2)} for key, value in saldos.items()]
+    records = []
+    for key, _ in SHEETS["saldos"]["default_rows"]:
+        records.append({"clave": key, "valor": saldos.get(key, "")})
     replace_records("saldos", records)
 
 
@@ -812,367 +485,586 @@ def change_saldo(saldos, key, amount):
     saldos[key] = round(to_float(saldos.get(key, 0)) + float(amount), 2)
 
 
-def normalize_ventas_financials(ventas):
-    """Corrige columnas financieras de ventas para reportes usando reglas actuales.
+def mark_saldo_movement(saldos):
+    saldos["ultimo_movimiento_saldo"] = mx_now().strftime("%Y-%m-%d %H:%M:%S")
 
-    Corrección v19:
-    Google Sheets puede regresar columnas como string/Arrow.
-    Antes de escribir números, convertimos las columnas financieras a float
-    para evitar TypeError en Pandas.
-    """
-    if ventas.empty:
-        return ventas
 
-    ventas = ventas.copy()
+def set_saldo_manual(new_amount, note):
+    saldos = get_saldos()
+    saldos["saldo_norte_brunch"] = round(to_float(new_amount), 2)
+    mark_saldo_movement(saldos)
+    save_saldos(saldos)
 
-    numeric_cols = [
-        "cantidad",
-        "precio_unitario",
-        "total_linea",
-        "ganancia_personal_unitaria",
-        "ganancia_personal_linea",
-        "diezmo_linea",
-        "dinero_norte_linea",
-        "total_neto_linea",
-        "comision_terminal_linea",
-        "monto_tarjeta_linea",
-    ]
+    append_record("ajustes_saldo", {
+        **now_record(), "ajuste_id": str(uuid.uuid4()), "tipo": "ajuste manual",
+        "monto": new_amount, "saldo_resultante": saldos["saldo_norte_brunch"], "nota": note,
+    })
 
-    for col in numeric_cols:
-        if col not in ventas.columns:
-            ventas[col] = 0
-        ventas[col] = pd.to_numeric(ventas[col], errors="coerce").fillna(0.0).astype(float)
 
-    # Evita problemas con índices raros o duplicados al usar .at
-    ventas = ventas.reset_index(drop=True)
+def set_deuda_manual(new_amount, note):
+    saldos = get_saldos()
+    saldos["deuda_norte_a_mi"] = round(to_float(new_amount), 2)
+    save_saldos(saldos)
 
-    for idx, row in ventas.iterrows():
-        fee = to_float(row.get("comision_terminal_linea", 0))
+    append_record("deuda_movimientos", {
+        **now_record(), "movimiento_id": str(uuid.uuid4()), "tipo": "ajuste manual",
+        "monto": new_amount, "deuda_resultante": saldos["deuda_norte_a_mi"], "nota": note,
+    })
 
-        # Si por alguna razón la comisión no fue guardada pero hubo tarjeta, la recalculamos.
-        if fee <= 0:
-            card_line = to_float(row.get("monto_tarjeta_linea", 0))
-            fee = round(card_line * CARD_FEE_RATE, 2)
-            ventas.loc[idx, "comision_terminal_linea"] = fee
 
-        calc = calculate_line_financials(
-            row.get("producto", ""),
-            to_float(row.get("cantidad", 0)),
-            to_float(row.get("precio_unitario", 0)),
-            to_float(row.get("ganancia_personal_unitaria", 0)),
-            card_fee_line=fee,
+def pay_debt(amount, note):
+    amount = round(to_float(amount), 2)
+    saldos = get_saldos()
+    amount = min(amount, saldos["deuda_norte_a_mi"], saldos["saldo_norte_brunch"])
+
+    if amount <= 0:
+        st.error("No hay saldo suficiente o no hay deuda.")
+        return
+
+    change_saldo(saldos, "saldo_norte_brunch", -amount)
+    change_saldo(saldos, "deuda_norte_a_mi", -amount)
+    mark_saldo_movement(saldos)
+    save_saldos(saldos)
+
+    append_record("deuda_movimientos", {
+        **now_record(), "movimiento_id": str(uuid.uuid4()), "tipo": "pago",
+        "monto": amount, "deuda_resultante": saldos["deuda_norte_a_mi"], "nota": note,
+    })
+
+    append_record("ajustes_saldo", {
+        **now_record(), "ajuste_id": str(uuid.uuid4()), "tipo": "pago de deuda",
+        "monto": -amount, "saldo_resultante": saldos["saldo_norte_brunch"], "nota": note,
+    })
+
+
+def can_alert_debt_payment():
+    saldos = get_saldos()
+    if saldos["deuda_norte_a_mi"] <= 0:
+        return False, "No hay deuda pendiente."
+    if saldos["saldo_norte_brunch"] < DEBT_PAYMENT_ALERT_AMOUNT:
+        return False, f"Saldo menor a {pesos(DEBT_PAYMENT_ALERT_AMOUNT)}."
+
+    last = saldos.get("ultimo_movimiento_saldo", "")
+    if not last:
+        return True, "Hay saldo suficiente y no hay fecha de último movimiento."
+
+    try:
+        last_dt = datetime.strptime(last, "%Y-%m-%d %H:%M:%S").replace(tzinfo=TIMEZONE)
+    except Exception:
+        return True, "Hay saldo suficiente."
+
+    days = (mx_now() - last_dt).days
+    if days >= 7:
+        return True, f"El saldo lleva {days} días sin movimiento."
+    return False, f"El saldo todavía se ha movido recientemente. Último movimiento: {last}."
+
+
+def load_products(active_only=True):
+    df = load_df("productos")
+    if df.empty:
+        return pd.DataFrame(columns=SHEETS["productos"]["headers"])
+    df = df.copy()
+    for col in ["precio", "ganancia_personal"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype(float)
+    df["activo"] = df["activo"].astype(str).str.lower().replace("", "si")
+    if active_only:
+        df = df[df["activo"] != "no"]
+    return df.reset_index(drop=True)
+
+
+def save_products(df):
+    records = []
+    for _, row in df.iterrows():
+        records.append({
+            "producto": str(row.get("producto", "")).strip(),
+            "precio": to_float(row.get("precio", 0)),
+            "ganancia_personal": to_float(row.get("ganancia_personal", 0)),
+            "activo": str(row.get("activo", "si")).strip().lower() or "si",
+        })
+    replace_records("productos", records)
+
+
+def calculate_line(product, quantity, price, profit, card_fee=0):
+    quantity = int(quantity)
+    price = to_float(price)
+    profit = to_float(profit)
+    card_fee = to_float(card_fee)
+
+    total = round(quantity * price, 2)
+    profit_line = round(quantity * profit, 2)
+    tithing = round(profit_line * TITHING_RATE, 2)
+    norte = round(total - profit_line - card_fee, 2)
+    net = round(total - card_fee, 2)
+
+    return {
+        "producto": product,
+        "cantidad": quantity,
+        "precio_unitario": price,
+        "ganancia_personal_unitaria": profit,
+        "total_linea": total,
+        "ganancia_personal_linea": profit_line,
+        "diezmo_sugerido_linea": tithing,
+        "dinero_norte_linea": norte,
+        "comision_terminal_linea": card_fee,
+        "total_neto_linea": net,
+    }
+
+
+def init_cart():
+    if "cart" not in st.session_state:
+        st.session_state.cart = []
+
+
+def cart_totals():
+    total = sum(to_float(i["total_linea"]) for i in st.session_state.cart)
+    profit = sum(to_float(i["ganancia_personal_linea"]) for i in st.session_state.cart)
+    tithing = round(profit * TITHING_RATE, 2)
+    return {"total": round(total, 2), "profit": round(profit, 2), "tithing": round(tithing, 2)}
+
+
+def register_sale(payment_method, note):
+    if not st.session_state.cart:
+        st.error("No hay productos en la venta.")
+        return
+
+    totals = cart_totals()
+    total = totals["total"]
+    venta_id = str(uuid.uuid4())
+
+    card_total = total if payment_method == "Tarjeta" else 0
+    fee_total = round(card_total * CARD_FEE_RATE, 2)
+
+    total_profit = 0
+    total_tithing = 0
+    total_norte = 0
+    total_net = 0
+
+    for item in st.session_state.cart:
+        share = to_float(item["total_linea"]) / total if total else 0
+        fee_line = round(fee_total * share, 2)
+
+        line = calculate_line(
+            item["producto"], item["cantidad"], item["precio_unitario"],
+            item["ganancia_personal_unitaria"], card_fee=fee_line,
         )
 
-        ventas.loc[idx, "ganancia_personal_unitaria"] = float(calc["unit_profit"])
-        ventas.loc[idx, "ganancia_personal_linea"] = float(calc["personal_profit_line"])
-        ventas.loc[idx, "diezmo_linea"] = float(calc["tithing_line"])
-        ventas.loc[idx, "dinero_norte_linea"] = float(calc["norte_line"])
-        ventas.loc[idx, "total_neto_linea"] = float(calc["net_line"])
+        total_profit += line["ganancia_personal_linea"]
+        total_tithing += line["diezmo_sugerido_linea"]
+        total_norte += line["dinero_norte_linea"]
+        total_net += line["total_neto_linea"]
 
-    return ventas
+        append_record("ventas", {
+            **now_record(), "venta_id": venta_id, **line,
+            "metodo_pago": payment_method, "nota": note,
+        })
 
+    total_profit = round(total_profit, 2)
+    total_tithing = round(total_tithing, 2)
+    total_norte = round(total_norte, 2)
+    total_net = round(total_net, 2)
 
-def calculate_general_sales_totals_from_ventas():
-    """Recalcula totales generales usando la hoja Ventas con las reglas actuales."""
-    ventas = load_df("ventas")
-    if ventas.empty:
-        return {
-            "ventas_totales_brutas": 0,
-            "ventas_totales_netas": 0,
-            "total_para_norte": 0,
-            "total_para_paga_personal": 0,
-            "total_para_diezmo": 0,
-            "total_comisiones_terminal": 0,
-        }
-
-    ventas = to_numeric(ventas, [
-        "cantidad",
-        "precio_unitario",
-        "total_linea",
-        "ganancia_personal_unitaria",
-        "monto_tarjeta_linea",
-        "comision_terminal_linea",
-        "total_neto_linea",
-    ])
-    ventas = normalize_ventas_financials(ventas)
-
-    return {
-        "ventas_totales_brutas": round(float(ventas["total_linea"].sum()), 2),
-        "ventas_totales_netas": round(float(ventas["total_neto_linea"].sum()), 2),
-        "total_para_norte": round(float(ventas["dinero_norte_linea"].sum()), 2),
-        "total_para_paga_personal": round(float(ventas["ganancia_personal_linea"].sum()), 2),
-        "total_para_diezmo": round(float(ventas["diezmo_linea"].sum()), 2),
-        "total_comisiones_terminal": round(float(ventas["comision_terminal_linea"].sum()), 2),
-    }
-
-
-def recalculate_general_sales_saldos():
-    """Actualiza saldos generales y corrige pendientes de paga/diezmo usando Ventas."""
-    totals = calculate_general_sales_totals_from_ventas()
     saldos = get_saldos()
-
-    for key, value in totals.items():
-        saldos[key] = value
-
-    saldos["ganancia_pendiente_personal"] = round(
-        totals["total_para_paga_personal"] - to_float(saldos.get("ganancia_pagada_personal", 0)),
-        2,
-    )
-    saldos["diezmo_pendiente"] = round(
-        totals["total_para_diezmo"] - to_float(saldos.get("diezmo_pagado", 0)),
-        2,
-    )
-
-    saldos["ganancia_pendiente_personal"] = max(0, saldos["ganancia_pendiente_personal"])
-    saldos["diezmo_pendiente"] = max(0, saldos["diezmo_pendiente"])
-
-    save_saldos(saldos)
-    return totals
-
-
-def get_config_value(key, default=""):
-    df = load_df("config")
-    if not df.empty:
-        for _, row in df.iterrows():
-            if str(row.get("clave", "")) == key:
-                return str(row.get("valor", default))
-    return default
-
-
-def set_config_value(key, value):
-    df = load_df("config")
-    records = []
-    found = False
-
-    if not df.empty:
-        for _, row in df.iterrows():
-            if str(row.get("clave", "")) == key:
-                records.append({"clave": key, "valor": value})
-                found = True
-            else:
-                records.append({"clave": row.get("clave", ""), "valor": row.get("valor", "")})
-
-    if not found:
-        records.append({"clave": key, "valor": value})
-
-    replace_records("config", records)
-
-
-
-def get_next_personal_payment_date(frequency, today=None):
-    today = today or mx_now().date()
-    frequency = str(frequency).lower().strip()
-
-    if frequency == "semanal":
-        # Domingo como cierre semanal.
-        days_until_sunday = (6 - today.weekday()) % 7
-        return today + timedelta(days=days_until_sunday)
-
-    if frequency == "quincenal":
-        if today.day <= 15:
-            return today.replace(day=15)
-        next_month = today.replace(day=28) + timedelta(days=4)
-        last_day = next_month - timedelta(days=next_month.day)
-        return last_day
-
-    # Mensual: último día del mes.
-    next_month = today.replace(day=28) + timedelta(days=4)
-    last_day = next_month - timedelta(days=next_month.day)
-    return last_day
-
-
-def record_family_income_from_norte(fecha, producto, amount, nota):
-    append_record("gastos_familiares", {
-        **fecha,
-        "tipo": "ingreso",
-        "categoria": "pago de Norte Brunch",
-        "producto": producto,
-        "monto": amount,
-        "metodo_pago": "Norte Brunch",
-        "nota": nota,
-    })
-
-
-def claim_personal_profit(fecha):
-    saldos = get_saldos()
-    amount = round(float(saldos["ganancia_pendiente_personal"]), 2)
-
-    if amount <= 0:
-        st.error("No hay ganancia pendiente para pagarte.")
-        return
-
-    if amount > saldos["dinero_norte_brunch"]:
-        st.error("Norte Brunch no tiene suficiente dinero para pagarte toda la ganancia pendiente.")
-        return
-
-    change_saldo(saldos, "dinero_norte_brunch", -amount)
-    change_saldo(saldos, "ganancia_pendiente_personal", -amount)
-    change_saldo(saldos, "ganancia_pagada_personal", amount)
-    change_saldo(saldos, "dinero_familiar", amount)
-    change_saldo(saldos, "ingresos_familiares_totales", amount)
+    change_saldo(saldos, "saldo_norte_brunch", total_net)
+    change_saldo(saldos, "ganancia_personal_pendiente", total_profit)
+    change_saldo(saldos, "diezmo_sugerido_total", total_tithing)
+    change_saldo(saldos, "ventas_totales_brutas", total)
+    change_saldo(saldos, "ventas_totales_netas", total_net)
+    change_saldo(saldos, "total_para_norte", total_norte)
+    change_saldo(saldos, "total_comisiones_terminal", fee_total)
+    mark_saldo_movement(saldos)
     save_saldos(saldos)
 
-    record_family_income_from_norte(
-        fecha,
-        "Pago de ganancia personal",
-        amount,
-        "Pago automático de ganancia personal de Norte Brunch",
+    st.session_state.cart = []
+    big_paid("VENTA REGISTRADA", total_net)
+    st.success(
+        f"Venta bruta: {pesos(total)} | Para tu paga: {pesos(total_profit)} | "
+        f"Diezmo sugerido: {pesos(total_tithing)} | Para Norte Brunch: {pesos(total_norte)}"
     )
-
-    big_green_amount("Pago personal realizado", amount)
-    st.success("Se registró automáticamente como ingreso familiar.")
+    st.rerun()
 
 
-def calculate_investment_repayment_status(saldos):
-    available = round(
-        float(saldos["dinero_norte_brunch"]) - float(saldos["ganancia_pendiente_personal"]),
-        2,
-    )
-    debt = round(float(saldos["deuda_inversion_personal"]), 2)
-
-    if debt <= 0:
-        return {
-            "available": available,
-            "debt": debt,
-            "can_pay": False,
-            "suggested_payment": 0,
-            "message": "Norte Brunch no tiene deuda pendiente contigo.",
-        }
-
-    if available >= MIN_INVESTMENT_REPAYMENT_ALERT or (available >= debt and debt > 0):
-        suggested = min(debt, available, MIN_INVESTMENT_REPAYMENT_ALERT if debt >= MIN_INVESTMENT_REPAYMENT_ALERT else debt)
-        return {
-            "available": available,
-            "debt": debt,
-            "can_pay": suggested > 0,
-            "suggested_payment": round(suggested, 2),
-            "message": "Norte Brunch ya tiene dinero disponible para abonarte a tu inversión.",
-        }
-
-    return {
-        "available": available,
-        "debt": debt,
-        "can_pay": False,
-        "suggested_payment": 0,
-        "message": f"Aún no hay $10,000 libres para abonarte. Disponible estimado: {pesos(available)}.",
-    }
-
-
-def repay_investment_suggested(fecha):
-    saldos = get_saldos()
-    status = calculate_investment_repayment_status(saldos)
-    amount = status["suggested_payment"]
-
-    if amount <= 0:
-        st.error("Aún no hay pago sugerido para recuperar inversión.")
-        return
-
-    if amount > saldos["dinero_norte_brunch"]:
-        st.error("Norte Brunch no tiene suficiente dinero.")
-        return
-
-    change_saldo(saldos, "dinero_norte_brunch", -amount)
-    change_saldo(saldos, "deuda_inversion_personal", -amount)
-    change_saldo(saldos, "inversion_pagada_personal", amount)
-    change_saldo(saldos, "dinero_familiar", amount)
-    change_saldo(saldos, "ingresos_familiares_totales", amount)
-    save_saldos(saldos)
-
-    append_record("inversiones", {
-        **fecha,
-        "tipo": "pago_inversion",
-        "monto": amount,
-        "nota": "Abono automático sugerido para recuperar inversión",
-    })
-
-    record_family_income_from_norte(
-        fecha,
-        "Recuperación de inversión",
-        amount,
-        "Abono de Norte Brunch para recuperar inversión personal",
-    )
-
-    big_green_amount("Abono de inversión recuperado", amount)
-    st.success("Se registró automáticamente como ingreso familiar.")
-
-
-def load_categories(sheet_key):
-    df = load_df(sheet_key)
+def ventas_df():
+    df = load_df("ventas")
     if df.empty:
-        return []
-
-    if "activo" not in df.columns:
-        df["activo"] = "si"
-
-    categories = []
-    for _, row in df.iterrows():
-        category = str(row.get("categoria", "")).strip()
-        active = str(row.get("activo", "si")).lower().strip()
-        if category and active != "no":
-            categories.append(category)
-
-    return sorted(set(categories))
+        return df
+    numeric = [
+        "cantidad", "precio_unitario", "ganancia_personal_unitaria", "total_linea",
+        "ganancia_personal_linea", "diezmo_sugerido_linea", "dinero_norte_linea",
+        "comision_terminal_linea", "total_neto_linea",
+    ]
+    for col in numeric:
+        if col not in df.columns:
+            df[col] = 0
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype(float)
+    return df
 
 
-def add_category(sheet_key, category):
-    category = category.strip().lower()
-    if not category:
+def gastos_df():
+    df = load_df("gastos")
+    if df.empty:
+        return df
+    if "monto" not in df.columns:
+        df["monto"] = 0
+    df["monto"] = pd.to_numeric(df["monto"], errors="coerce").fillna(0.0).astype(float)
+    return df
+
+
+def filter_by_period(df, start_date, end_date):
+    if df.empty or "fecha" not in df.columns:
+        return df
+    temp = df.copy()
+    temp["fecha_dt"] = pd.to_datetime(temp["fecha"], errors="coerce").dt.date
+    return temp[(temp["fecha_dt"] >= start_date) & (temp["fecha_dt"] <= end_date)].drop(columns=["fecha_dt"])
+
+
+def period_picker(prefix):
+    today = mx_now().date()
+    option = st.selectbox("Periodo", ["Hoy", "Esta semana", "Este mes", "Personalizado"], key=f"{prefix}_periodo")
+
+    if option == "Hoy":
+        return today, today
+    if option == "Esta semana":
+        start = today - timedelta(days=today.weekday())
+        return start, today
+    if option == "Este mes":
+        return today.replace(day=1), today
+
+    c1, c2 = st.columns(2)
+    start = c1.date_input("Desde", value=today - timedelta(days=7), key=f"{prefix}_start")
+    end = c2.date_input("Hasta", value=today, key=f"{prefix}_end")
+    return start, end
+
+
+def page_venta():
+    init_cart()
+    st.header("Registrar venta")
+    products = load_products(active_only=True)
+    if products.empty:
+        st.warning("No hay productos activos.")
         return
-    current = [c.lower() for c in load_categories(sheet_key)]
-    if category not in current:
-        append_record(sheet_key, {"categoria": category, "activo": "si"})
+
+    st.subheader("Productos rápidos")
+    cols = st.columns(2)
+    for idx, row in products.iterrows():
+        label = f"{row['producto']}\n{pesos(row['precio'])}"
+        if cols[idx % 2].button(label, key=f"quick_{idx}"):
+            line = calculate_line(row["producto"], 1, row["precio"], row["ganancia_personal"])
+            st.session_state.cart.append(line)
+            st.rerun()
+
+    st.divider()
+    st.subheader("Agregar con cantidad")
+    c1, c2 = st.columns([2, 1])
+    product_name = c1.selectbox("Producto", products["producto"].tolist())
+    qty = c2.number_input("Cantidad", min_value=1, value=1, step=1)
+
+    if st.button("Agregar al carrito"):
+        row = products[products["producto"] == product_name].iloc[0]
+        line = calculate_line(row["producto"], qty, row["precio"], row["ganancia_personal"])
+        st.session_state.cart.append(line)
+        st.rerun()
+
+    st.divider()
+    st.subheader("Carrito")
+    if not st.session_state.cart:
+        st.info("Todavía no hay productos en esta venta.")
+        return
+
+    for idx, item in enumerate(st.session_state.cart):
+        c1, c2, c3 = st.columns([3, 1, 1])
+        c1.write(f"**{item['producto']}** x {item['cantidad']}")
+        c2.write(pesos(item["total_linea"]))
+        if c3.button("Quitar", key=f"remove_{idx}"):
+            st.session_state.cart.pop(idx)
+            st.rerun()
+
+    totals = cart_totals()
+    big_total("TOTAL A COBRAR", totals["total"])
+
+    m1, m2 = st.columns(2)
+    m1.metric("Para mi paga", pesos(totals["profit"]))
+    m2.metric("Diezmo sugerido", pesos(totals["tithing"]))
+
+    payment_method = st.selectbox("Método de pago", ["Efectivo", "Tarjeta", "Transferencia"])
+    if payment_method == "Tarjeta":
+        st.warning(f"Comisión terminal: {pesos(totals['total'] * CARD_FEE_RATE)}")
+
+    note = st.text_input("Nota", placeholder="Opcional")
+    if st.button("Cobrar y guardar venta"):
+        register_sale(payment_method, note)
 
 
-def get_previous_values(sheet_key, column_name):
-    """Regresa valores únicos ya usados para simular autocompletado con selectbox."""
-    df = load_df(sheet_key)
-    if df.empty or column_name not in df.columns:
-        return []
+def page_gastos():
+    st.header("Gastos de Norte Brunch")
+    with st.form("gasto_form"):
+        fecha = selected_datetime_record("gasto_form")
+        categoria = st.selectbox("Categoría", ["insumos", "local", "transporte"])
+        producto_gasto = st.text_input("Producto o gasto", placeholder="Ej. pan, carne, renta, gasolina")
+        monto = st.number_input("Monto", min_value=0.0, step=10.0)
+        pagado_con = st.radio("Pagado con", ["Dinero de Norte Brunch", "Mi dinero personal"], horizontal=False)
+        nota = st.text_input("Nota", placeholder="Opcional")
+        guardar = st.form_submit_button("Guardar gasto")
 
-    values = []
-    for value in df[column_name].dropna().tolist():
-        text = str(value).strip()
-        if text and text.lower() not in [v.lower() for v in values]:
-            values.append(text)
+    if guardar:
+        if not producto_gasto.strip() or monto <= 0:
+            st.error("Falta producto/gasto o monto.")
+            return
 
-    return sorted(values, key=str.lower)
+        saldos = get_saldos()
+        aumenta_deuda = "no"
+        if pagado_con == "Dinero de Norte Brunch":
+            change_saldo(saldos, "saldo_norte_brunch", -monto)
+            change_saldo(saldos, "gastos_pagados_norte", monto)
+            mark_saldo_movement(saldos)
+        else:
+            change_saldo(saldos, "deuda_norte_a_mi", monto)
+            change_saldo(saldos, "gastos_pagados_personal", monto)
+            aumenta_deuda = "si"
+
+        change_saldo(saldos, "total_gastos_negocio", monto)
+        save_saldos(saldos)
+
+        append_record("gastos", {
+            **fecha, "gasto_id": str(uuid.uuid4()), "categoria": categoria,
+            "producto_gasto": producto_gasto.strip(), "monto": monto,
+            "pagado_con": pagado_con, "aumenta_deuda": aumenta_deuda, "nota": nota,
+        })
+
+        if aumenta_deuda == "si":
+            append_record("deuda_movimientos", {
+                **fecha, "movimiento_id": str(uuid.uuid4()),
+                "tipo": "aumento por gasto pagado por mí",
+                "monto": monto, "deuda_resultante": saldos["deuda_norte_a_mi"],
+                "nota": f"{categoria}: {producto_gasto.strip()}",
+            })
+
+        st.success("Gasto guardado.")
+        st.rerun()
+
+    st.divider()
+    start, end = period_picker("gastos")
+    df = filter_by_period(gastos_df(), start, end)
+    st.metric("Gastos del periodo", pesos(df["monto"].sum() if not df.empty else 0))
+    st.dataframe(df, use_container_width=True)
 
 
-def autocomplete_or_new(label, previous_values, key_prefix, placeholder="Escribe el nombre"):
-    """Permite elegir un valor anterior o escribir uno nuevo."""
-    options = ["Escribir nuevo"] + previous_values
-    choice = st.selectbox(label, options, key=f"{key_prefix}_choice")
+def page_saldos():
+    st.header("Saldo y deuda")
+    saldos = get_saldos()
 
-    if choice == "Escribir nuevo":
-        return st.text_input(placeholder, key=f"{key_prefix}_new").strip()
+    alert, reason = can_alert_debt_payment()
+    if alert:
+        st.warning(
+            f"Norte Brunch puede abonarte a la deuda. "
+            f"Saldo: {pesos(saldos['saldo_norte_brunch'])}. Deuda: {pesos(saldos['deuda_norte_a_mi'])}. {reason}"
+        )
 
-    custom = st.text_input(
-        "Editar nombre si quieres",
-        value=choice,
-        key=f"{key_prefix}_edit",
-    ).strip()
-    return custom or choice
+    c1, c2 = st.columns(2)
+    c1.metric("Saldo Norte Brunch", pesos(saldos["saldo_norte_brunch"]))
+    c2.metric("Deuda hacia mí", pesos(saldos["deuda_norte_a_mi"]))
+
+    c3, c4 = st.columns(2)
+    c3.metric("Mi paga pendiente", pesos(saldos["ganancia_personal_pendiente"]))
+    c4.metric("Mi paga pagada", pesos(saldos["ganancia_personal_pagada"]))
+
+    st.divider()
+    tab1, tab2, tab3 = st.tabs(["Ajustar saldo", "Ajustar deuda", "Pagar deuda"])
+
+    with tab1:
+        with st.form("ajuste_saldo_form"):
+            nuevo_saldo = st.number_input("Nuevo saldo de Norte Brunch", min_value=0.0, step=100.0)
+            nota = st.text_input("Nota del ajuste", placeholder="Ej. conteo de caja")
+            guardar = st.form_submit_button("Guardar ajuste de saldo")
+        if guardar:
+            set_saldo_manual(nuevo_saldo, nota)
+            st.success("Saldo ajustado.")
+            st.rerun()
+
+    with tab2:
+        with st.form("ajuste_deuda_form"):
+            nueva_deuda = st.number_input("Nueva deuda de Norte Brunch hacia mí", min_value=0.0, step=100.0)
+            nota = st.text_input("Nota", placeholder="Ej. ajuste inicial")
+            guardar = st.form_submit_button("Guardar ajuste de deuda")
+        if guardar:
+            set_deuda_manual(nueva_deuda, nota)
+            st.success("Deuda ajustada.")
+            st.rerun()
+
+    with tab3:
+        sugerido = min(saldos["deuda_norte_a_mi"], max(saldos["saldo_norte_brunch"] - DEBT_PAYMENT_ALERT_AMOUNT, 0))
+        st.info(f"Pago sugerido sin bajar de $10,000: {pesos(sugerido)}")
+        if st.button("Registrar abono sugerido a deuda"):
+            pay_debt(sugerido, "Abono sugerido a deuda")
+            st.success("Abono registrado.")
+            st.rerun()
+
+    st.divider()
+    st.subheader("Totales acumulados")
+    a1, a2 = st.columns(2)
+    a1.metric("Ventas brutas", pesos(saldos["ventas_totales_brutas"]))
+    a2.metric("Ventas netas", pesos(saldos["ventas_totales_netas"]))
+    a3, a4 = st.columns(2)
+    a3.metric("Para Norte Brunch", pesos(saldos["total_para_norte"]))
+    a4.metric("Comisiones", pesos(saldos["total_comisiones_terminal"]))
 
 
-# -----------------------------
-# SEGURIDAD
-# -----------------------------
+def page_pago_personal():
+    st.header("Pago personal semanal")
+    saldos = get_saldos()
+    st.metric("Mi paga pendiente", pesos(saldos["ganancia_personal_pendiente"]))
+
+    diezmo = round(saldos["ganancia_personal_pendiente"] * TITHING_RATE, 2)
+    libre = round(saldos["ganancia_personal_pendiente"] - diezmo, 2)
+    c1, c2 = st.columns(2)
+    c1.metric("Diezmo sugerido", pesos(diezmo))
+    c2.metric("Pago libre estimado", pesos(libre))
+
+    if is_saturday_after_6pm():
+        st.success("Ya es sábado después de las 6:00 pm. Puedes hacer tu corte semanal.")
+        permitido = True
+    else:
+        siguiente = next_saturday_6pm()
+        st.warning(f"Solo puedes pagarte los sábados después de las 6:00 pm. Próximo corte: {siguiente.strftime('%Y-%m-%d %H:%M')}")
+        permitido = False
+
+    if saldos["ganancia_personal_pendiente"] <= 0:
+        st.info("No tienes paga pendiente.")
+        permitido = False
+
+    if saldos["saldo_norte_brunch"] < saldos["ganancia_personal_pendiente"]:
+        st.error("Norte Brunch no tiene saldo suficiente para pagarte toda tu paga pendiente.")
+        permitido = False
+
+    if st.button("Registrar mi pago semanal", disabled=not permitido):
+        amount = saldos["ganancia_personal_pendiente"]
+        diezmo = round(amount * TITHING_RATE, 2)
+        libre = round(amount - diezmo, 2)
+
+        change_saldo(saldos, "saldo_norte_brunch", -amount)
+        change_saldo(saldos, "ganancia_personal_pendiente", -amount)
+        change_saldo(saldos, "ganancia_personal_pagada", amount)
+        change_saldo(saldos, "diezmo_sugerido_pagado", diezmo)
+        mark_saldo_movement(saldos)
+        save_saldos(saldos)
+
+        append_record("pagos_personales", {
+            **now_record(), "pago_id": str(uuid.uuid4()),
+            "monto_pago_bruto": amount, "diezmo_sugerido": diezmo,
+            "pago_libre_estimado": libre, "nota": "Pago personal semanal",
+        })
+
+        big_paid("PAGO PERSONAL REGISTRADO", amount)
+        st.success(f"Diezmo sugerido de este pago: {pesos(diezmo)}. Libre estimado: {pesos(libre)}.")
+        st.rerun()
+
+
+def page_productos():
+    st.header("Productos")
+    df = load_products(active_only=False)
+    st.dataframe(df, use_container_width=True)
+
+    st.subheader("Agregar o modificar producto")
+    productos = ["Nuevo producto"] + df["producto"].tolist()
+    selected = st.selectbox("Producto", productos)
+
+    if selected == "Nuevo producto":
+        default_name, default_price, default_profit, default_active = "", 0.0, 0.0, "si"
+    else:
+        row = df[df["producto"] == selected].iloc[0]
+        default_name = row["producto"]
+        default_price = to_float(row["precio"])
+        default_profit = to_float(row["ganancia_personal"])
+        default_active = str(row["activo"])
+
+    with st.form("producto_form"):
+        name = st.text_input("Nombre", value=default_name)
+        price = st.number_input("Precio de venta", min_value=0.0, value=float(default_price), step=5.0)
+        profit = st.number_input("Ganancia personal", min_value=0.0, value=float(default_profit), step=5.0)
+        active = st.selectbox("Activo", ["si", "no"], index=0 if default_active != "no" else 1)
+        save = st.form_submit_button("Guardar producto")
+
+    if save:
+        if not name.strip():
+            st.error("Escribe el nombre.")
+            return
+
+        df = load_products(active_only=False)
+        record = {"producto": name.strip(), "precio": price, "ganancia_personal": profit, "activo": active}
+        if selected != "Nuevo producto" and selected in df["producto"].tolist():
+            df.loc[df["producto"] == selected, ["producto", "precio", "ganancia_personal", "activo"]] = [
+                record["producto"], record["precio"], record["ganancia_personal"], record["activo"]
+            ]
+        elif name.strip() in df["producto"].tolist():
+            df.loc[df["producto"] == name.strip(), ["precio", "ganancia_personal", "activo"]] = [
+                record["precio"], record["ganancia_personal"], record["activo"]
+            ]
+        else:
+            df = pd.concat([df, pd.DataFrame([record])], ignore_index=True)
+
+        save_products(df)
+        st.success("Producto guardado.")
+        st.rerun()
+
+
+def page_reportes():
+    st.header("Reportes")
+    start, end = period_picker("reportes")
+    ventas = filter_by_period(ventas_df(), start, end)
+    gastos = filter_by_period(gastos_df(), start, end)
+
+    ventas_brutas = ventas["total_linea"].sum() if not ventas.empty else 0
+    ventas_netas = ventas["total_neto_linea"].sum() if not ventas.empty else 0
+    mi_paga = ventas["ganancia_personal_linea"].sum() if not ventas.empty else 0
+    diezmo = ventas["diezmo_sugerido_linea"].sum() if not ventas.empty else 0
+    norte = ventas["dinero_norte_linea"].sum() if not ventas.empty else 0
+    gastos_total = gastos["monto"].sum() if not gastos.empty else 0
+    balance_periodo = ventas_netas - gastos_total
+
+    c1, c2 = st.columns(2)
+    c1.metric("Ventas brutas", pesos(ventas_brutas))
+    c2.metric("Ventas netas", pesos(ventas_netas))
+    c3, c4 = st.columns(2)
+    c3.metric("Mi paga generada", pesos(mi_paga))
+    c4.metric("Diezmo sugerido", pesos(diezmo))
+    c5, c6 = st.columns(2)
+    c5.metric("Para Norte Brunch", pesos(norte))
+    c6.metric("Gastos", pesos(gastos_total))
+    st.metric("Balance operativo del periodo", pesos(balance_periodo))
+    st.caption("La deuda hacia ti no se incluye en el balance diario/semanal/mensual. Se maneja aparte en Saldo y deuda.")
+
+    if not ventas.empty:
+        st.subheader("Productos vendidos")
+        resumen = ventas.groupby("producto").agg({
+            "cantidad": "sum",
+            "total_linea": "sum",
+            "ganancia_personal_linea": "sum",
+            "dinero_norte_linea": "sum",
+        }).reset_index()
+        st.dataframe(resumen, use_container_width=True)
+
+    with st.expander("Ventas"):
+        st.dataframe(ventas, use_container_width=True)
+    with st.expander("Gastos"):
+        st.dataframe(gastos, use_container_width=True)
+
 
 def check_password():
-    if "app" not in st.secrets or "password" not in st.secrets["app"]:
-        st.error("Falta configurar la contraseña en Streamlit Secrets.")
-        st.info('Agrega:\n\n[app]\npassword = "TU_PASSWORD_AQUI"')
-        return False
-
-    if st.session_state.get("authenticated", False):
+    password = st.secrets.get("app", {}).get("password", "")
+    if not password:
         return True
 
-    st.subheader("Acceso privado")
-    password = st.text_input("Contraseña", type="password")
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+
+    if st.session_state.authenticated:
+        return True
+
+    st.subheader("Acceso")
+    entered = st.text_input("Contraseña", type="password")
 
     if st.button("Entrar"):
-        if password == st.secrets["app"]["password"]:
-            st.session_state["authenticated"] = True
+        if entered == password:
+            st.session_state.authenticated = True
             st.rerun()
         else:
             st.error("Contraseña incorrecta.")
@@ -1180,1526 +1072,41 @@ def check_password():
     return False
 
 
-# -----------------------------
-# PRODUCTOS
-# -----------------------------
-
-def load_active_products():
-    df = load_df("productos")
-    if df.empty:
-        return df
-
-    df["precio"] = pd.to_numeric(df["precio"], errors="coerce").fillna(0)
-    df["ganancia_personal"] = pd.to_numeric(df["ganancia_personal"], errors="coerce").fillna(0)
-    df["activo"] = df["activo"].astype(str).str.lower().fillna("si")
-    return df[df["activo"] != "no"].copy()
-
-
-def page_productos():
-    st.header("Productos")
-
-    df = load_df("productos")
-    st.dataframe(df, use_container_width=True)
-
-    st.subheader("Agregar o modificar producto")
-    with st.form("producto_form"):
-        producto = st.text_input("Producto")
-        precio = st.number_input("Precio de venta", min_value=0.0, step=1.0)
-        ganancia = st.number_input("Ganancia personal por unidad", min_value=0.0, step=1.0)
-        activo = st.selectbox("Activo", ["si", "no"])
-        guardar = st.form_submit_button("Guardar producto")
-
-    if guardar:
-        if not producto.strip():
-            st.error("Escribe el nombre del producto.")
-            return
-
-        if is_torta(producto):
-            ganancia = 40
-            st.info("Regla aplicada: toda torta deja $40 de ganancia personal.")
-
-        df = load_df("productos")
-        records = []
-        updated = False
-
-        for _, row in df.iterrows():
-            current = str(row.get("producto", "")).strip().lower()
-            if current == producto.strip().lower():
-                records.append({
-                    "producto": producto.strip(),
-                    "precio": precio,
-                    "ganancia_personal": ganancia,
-                    "activo": activo,
-                })
-                updated = True
-            else:
-                records.append({
-                    "producto": row.get("producto", ""),
-                    "precio": row.get("precio", 0),
-                    "ganancia_personal": row.get("ganancia_personal", 0),
-                    "activo": row.get("activo", "si"),
-                })
-
-        if not updated:
-            records.append({
-                "producto": producto.strip(),
-                "precio": precio,
-                "ganancia_personal": ganancia,
-                "activo": activo,
-            })
-
-        replace_records("productos", records)
-        st.success("Producto guardado.")
-        st.rerun()
-
-
-# -----------------------------
-# PEDIDOS / VENTAS
-# -----------------------------
-
-def init_cart():
-    if "cart" not in st.session_state:
-        st.session_state.cart = []
-
-
-def load_records_with_row_numbers(sheet_key):
-    """Carga registros incluyendo el número real de fila en Google Sheets."""
-    ws = get_ws(sheet_key)
-    records = google_call(ws.get_all_records)
-    result = []
-    for index, record in enumerate(records, start=2):
-        record["__row_number__"] = index
-        result.append(record)
-    return result
-
-
-def update_cell_by_header(sheet_key, row_number, header, value):
-    ws = get_ws(sheet_key)
-    headers = get_actual_headers(sheet_key)
-    if header not in headers:
-        raise ValueError(f"No existe la columna {header} en {sheet_key}.")
-    col = headers.index(header) + 1
-    google_call(ws.update_cell, row_number, col, value)
-    clear_data_cache()
-
-
-def update_pedido_estado(pedido_id, new_status):
-    records = load_records_with_row_numbers("pedidos")
-    for record in records:
-        if str(record.get("pedido_id", "")) == str(pedido_id):
-            update_cell_by_header("pedidos", record["__row_number__"], "estado", new_status)
-    clear_data_cache()
-
-
-def add_product_to_cart(products, product, quantity=1):
-    row = products[products["producto"] == product].iloc[0]
-    product_name = str(row["producto"])
-    unit_price = to_float(row["precio"])
-    stored_profit = to_float(row["ganancia_personal"])
-
-    line = calculate_line_financials(product_name, quantity, unit_price, stored_profit)
-
-    st.session_state.cart.append({
-        "producto": product_name,
-        "cantidad": int(quantity),
-        "precio_unitario": unit_price,
-        "ganancia_personal_unitaria": line["unit_profit"],
-        "total_linea": line["total_line"],
-        "ganancia_personal_linea": line["personal_profit_line"],
-        "dinero_norte_linea": line["norte_line"],
-        "diezmo_linea": line["tithing_line"],
-    })
-
-
-def calculate_cart_totals(items):
-    if not items:
-        return {"total": 0, "profit": 0, "tithing": 0, "norte": 0}
-
-    df = pd.DataFrame(items)
-    return {
-        "total": round(df["total_linea"].sum(), 2),
-        "profit": round(df["ganancia_personal_linea"].sum(), 2),
-        "tithing": round(df["diezmo_linea"].sum(), 2),
-        "norte": round(df["dinero_norte_linea"].sum(), 2),
-    }
-
-
-def get_next_order_number_for_date(order_date):
-    date_text = order_date.strftime("%Y-%m-%d")
-    df = load_df("pedidos")
-
-    if df.empty or "fecha" not in df.columns or "pedido_numero" not in df.columns:
-        return 1
-
-    same_day = df[df["fecha"].astype(str) == date_text]
-    numbers = []
-
-    for value in same_day["pedido_numero"].dropna().tolist():
-        text = str(value).replace("Pedido", "").strip()
-        try:
-            numbers.append(int(text))
-        except ValueError:
-            continue
-
-    return max(numbers, default=0) + 1
-
-
-def create_pending_order(fecha, note):
-    if not st.session_state.cart:
-        st.error("El pedido está vacío.")
-        return
-
-    order_number = get_next_order_number_for_date(datetime.strptime(fecha["fecha"], "%Y-%m-%d").date())
-    pedido_numero = f"Pedido {order_number}"
-    pedido_id = f"{fecha['fecha'].replace('-', '')}-{order_number}-{str(uuid.uuid4())[:4]}"
-
-    for item in st.session_state.cart:
-        append_record("pedidos", {
-            **fecha,
-            "pedido_id": pedido_id,
-            "pedido_numero": pedido_numero,
-            "estado": "pendiente",
-            "producto": item["producto"],
-            "cantidad": item["cantidad"],
-            "precio_unitario": item["precio_unitario"],
-            "ganancia_personal_unitaria": item["ganancia_personal_unitaria"],
-            "total_linea": item["total_linea"],
-            "ganancia_personal_linea": item["ganancia_personal_linea"],
-            "dinero_norte_linea": item["dinero_norte_linea"],
-            "diezmo_linea": item["diezmo_linea"],
-            "nota": note,
-        })
-
-    st.session_state.cart = []
-    st.success(f"{pedido_numero} creado como pendiente. No cuenta como venta hasta que se pague.")
-    st.rerun()
-
-
-def get_pending_orders_df():
-    df = load_df("pedidos")
-    if df.empty:
-        return df
-
-    if "estado" not in df.columns:
-        df["estado"] = ""
-
-    df = df[df["estado"].astype(str).str.lower() == "pendiente"].copy()
-    df = to_numeric(df, [
-        "cantidad",
-        "precio_unitario",
-        "ganancia_personal_unitaria",
-        "total_linea",
-        "ganancia_personal_linea",
-        "dinero_norte_linea",
-        "diezmo_linea",
-    ])
-    return df
-
-
-def get_order_lines_with_rows(pedido_id):
-    records = load_records_with_row_numbers("pedidos")
-    lines = []
-    for record in records:
-        if (
-            str(record.get("pedido_id", "")) == str(pedido_id)
-            and str(record.get("estado", "")).lower() == "pendiente"
-        ):
-            lines.append(record)
-    return lines
-
-
-def append_line_to_pending_order(pedido_id, pedido_numero, fecha, product_row, quantity, note):
-    product_name = str(product_row["producto"])
-    unit_price = to_float(product_row["precio"])
-    stored_profit = to_float(product_row["ganancia_personal"])
-    quantity = int(quantity)
-
-    line = calculate_line_financials(product_name, quantity, unit_price, stored_profit)
-
-    append_record("pedidos", {
-        **fecha,
-        "pedido_id": pedido_id,
-        "pedido_numero": pedido_numero,
-        "estado": "pendiente",
-        "producto": product_name,
-        "cantidad": quantity,
-        "precio_unitario": unit_price,
-        "ganancia_personal_unitaria": line["unit_profit"],
-        "total_linea": line["total_line"],
-        "ganancia_personal_linea": line["personal_profit_line"],
-        "dinero_norte_linea": line["norte_line"],
-        "diezmo_linea": line["tithing_line"],
-        "nota": note,
-    })
-
-
-def calculate_payment_amounts(total, method, cash_amount=0, card_amount=0, transfer_amount=0):
-    if method == "Efectivo":
-        cash_amount, card_amount, transfer_amount = total, 0, 0
-    elif method == "Tarjeta":
-        cash_amount, card_amount, transfer_amount = 0, total, 0
-    elif method == "Transferencia":
-        cash_amount, card_amount, transfer_amount = 0, 0, total
-
-    cash_amount = round(float(cash_amount), 2)
-    card_amount = round(float(card_amount), 2)
-    transfer_amount = round(float(transfer_amount), 2)
-    paid_total = round(cash_amount + card_amount + transfer_amount, 2)
-    terminal_fee = round(card_amount * CARD_FEE_RATE, 2)
-    net_received = round(paid_total - terminal_fee, 2)
-
-    return {
-        "cash": cash_amount,
-        "card": card_amount,
-        "transfer": transfer_amount,
-        "paid_total": paid_total,
-        "terminal_fee": terminal_fee,
-        "net_received": net_received,
-    }
-
-
-def pay_pending_order(pedido_id, payment_date, method, amounts, note):
-    lines = get_order_lines_with_rows(pedido_id)
-
-    if not lines:
-        st.error("Este pedido ya no tiene líneas pendientes.")
-        return
-
-    df = pd.DataFrame(lines)
-    df = to_numeric(df, [
-        "cantidad",
-        "precio_unitario",
-        "ganancia_personal_unitaria",
-        "total_linea",
-        "ganancia_personal_linea",
-        "dinero_norte_linea",
-        "diezmo_linea",
-    ])
-
-    total = round(df["total_linea"].sum(), 2)
-
-    if abs(amounts["paid_total"] - total) > 0.01:
-        st.error(f"El total pagado debe ser igual a {pesos(total)}.")
-        return
-
-    if total <= 0:
-        st.error("El pedido tiene total cero.")
-        return
-
-    total_profit = 0
-    total_tithing = 0
-    total_norte = 0
-    total_net = 0
-    total_fee = 0
-
-    for _, line_row in df.iterrows():
-        share = to_float(line_row["total_linea"]) / total
-
-        cash_line = round(amounts["cash"] * share, 2)
-        card_line = round(amounts["card"] * share, 2)
-        transfer_line = round(amounts["transfer"] * share, 2)
-        fee_line = round(card_line * CARD_FEE_RATE, 2)
-
-        product_name = str(line_row.get("producto", ""))
-        quantity = to_float(line_row.get("cantidad", 0))
-        unit_price = to_float(line_row.get("precio_unitario", 0))
-        stored_profit = to_float(line_row.get("ganancia_personal_unitaria", 0))
-
-        line_calc = calculate_line_financials(
-            product_name,
-            quantity,
-            unit_price,
-            stored_profit,
-            card_fee_line=fee_line,
-        )
-
-        total_profit += line_calc["personal_profit_line"]
-        total_tithing += line_calc["tithing_line"]
-        total_norte += line_calc["norte_line"]
-        total_net += line_calc["net_line"]
-        total_fee += fee_line
-
-        append_record("ventas", {
-            **payment_date,
-            "pedido_id": line_row.get("pedido_id", pedido_id),
-            "pedido_numero": line_row.get("pedido_numero", ""),
-            "producto": product_name,
-            "cantidad": quantity,
-            "precio_unitario": unit_price,
-            "ganancia_personal_unitaria": line_calc["unit_profit"],
-            "total_linea": line_calc["total_line"],
-            "ganancia_personal_linea": line_calc["personal_profit_line"],
-            "dinero_norte_linea": line_calc["norte_line"],
-            "diezmo_linea": line_calc["tithing_line"],
-            "metodo_pago": method,
-            "monto_efectivo_linea": cash_line,
-            "monto_tarjeta_linea": card_line,
-            "monto_transferencia_linea": transfer_line,
-            "comision_terminal_linea": fee_line,
-            "total_neto_linea": line_calc["net_line"],
-            "nota": note,
-        })
-
-    total_profit = round(total_profit, 2)
-    total_tithing = round(total_tithing, 2)
-    total_norte = round(total_norte, 2)
-    total_net = round(total_net, 2)
-    total_fee = round(total_fee, 2)
-
-    update_pedido_estado(pedido_id, "pagado")
-
-    saldos = get_saldos()
-
-    # Dinero físico/digital que entra a Norte Brunch antes de pagarte a ti.
-    change_saldo(saldos, "dinero_norte_brunch", total_net)
-
-    # Tu paga y diezmo se separan automáticamente.
-    change_saldo(saldos, "ganancia_pendiente_personal", total_profit)
-    change_saldo(saldos, "diezmo_pendiente", total_tithing)
-
-    # Totales generales acumulados de ventas.
-    change_saldo(saldos, "ventas_totales_brutas", total)
-    change_saldo(saldos, "ventas_totales_netas", total_net)
-    change_saldo(saldos, "total_para_norte", total_norte)
-    change_saldo(saldos, "total_para_paga_personal", total_profit)
-    change_saldo(saldos, "total_para_diezmo", total_tithing)
-    change_saldo(saldos, "total_comisiones_terminal", total_fee)
-
-    save_saldos(saldos)
-
-    big_green_amount("PEDIDO PAGADO", total_net)
-    st.success(
-        f"Pedido pagado. Venta bruta: {pesos(total)} | Para tu paga: {pesos(total_profit)} | "
-        f"Diezmo: {pesos(total_tithing)} | Para Norte Brunch: {pesos(total_norte)} | "
-        f"Comisión terminal: {pesos(total_fee)} | Neto recibido: {pesos(total_net)}"
-    )
-    st.rerun()
-
-
-def render_current_cart(products):
-    st.subheader("Pedido nuevo en preparación")
-
-    if not st.session_state.cart:
-        st.info("El pedido nuevo está vacío.")
-        return
-
-    cart_df = pd.DataFrame(st.session_state.cart)
-    st.dataframe(cart_df, use_container_width=True)
-
-    totals = calculate_cart_totals(st.session_state.cart)
-
-    big_red_amount("TOTAL A COBRAR", totals["total"])
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Ganancia", pesos(totals["profit"]))
-    c2.metric("Diezmo", pesos(totals["tithing"]))
-    c3.metric("Para Norte", pesos(totals["norte"]))
-
-    st.write("**Quitar producto antes de crear el pedido**")
-    labels = [
-        f"{i + 1}. {item['producto']} x{item['cantidad']} - {pesos(item['total_linea'])}"
-        for i, item in enumerate(st.session_state.cart)
-    ]
-    selected = st.selectbox("Producto a quitar", labels, key="remove_cart_select")
-
-    col_remove, col_clear = st.columns(2)
-    if col_remove.button("Quitar producto del pedido nuevo"):
-        index = labels.index(selected)
-        st.session_state.cart.pop(index)
-        st.rerun()
-
-    if col_clear.button("Vaciar pedido nuevo"):
-        st.session_state.cart = []
-        st.rerun()
-
-    st.divider()
-    fecha = datetime_inputs("pedido_nuevo", "Fecha y hora del pedido")
-    note = st.text_input("Nota del pedido pendiente", placeholder="Opcional", key="nota_pedido_nuevo")
-
-    if st.button("Crear pedido pendiente", type="primary"):
-        create_pending_order(fecha, note)
-
-
-def render_pending_orders(products):
-    st.subheader("Pedidos pendientes")
-
-    pending = get_pending_orders_df()
-    if pending.empty:
-        st.info("No hay pedidos pendientes.")
-        return
-
-    grouped = pending.groupby(["pedido_id", "pedido_numero", "fecha"]).agg({
-        "total_linea": "sum",
-        "ganancia_personal_linea": "sum",
-        "diezmo_linea": "sum",
-    }).reset_index()
-
-    grouped = grouped.sort_values(["fecha", "pedido_numero"])
-    labels = []
-    label_to_id = {}
-
-    for _, row in grouped.iterrows():
-        label = f"{row['pedido_numero']} | {row['fecha']} | Total {pesos(row['total_linea'])}"
-        labels.append(label)
-        label_to_id[label] = row["pedido_id"]
-
-    selected_label = st.selectbox("Selecciona pedido", labels)
-    pedido_id = label_to_id[selected_label]
-    lines = get_order_lines_with_rows(pedido_id)
-
-    if not lines:
-        st.warning("Este pedido ya no tiene productos pendientes.")
-        return
-
-    lines_df = pd.DataFrame(lines)
-    lines_df = to_numeric(lines_df, [
-        "cantidad",
-        "precio_unitario",
-        "total_linea",
-        "ganancia_personal_linea",
-        "diezmo_linea",
-    ])
-
-    pedido_numero = str(lines_df.iloc[0]["pedido_numero"])
-    order_date = str(lines_df.iloc[0]["fecha"])
-    order_time = str(lines_df.iloc[0]["hora"])
-
-    st.write(f"### {pedido_numero}")
-    st.caption(f"Creado: {order_date} {order_time}")
-    st.dataframe(lines_df.drop(columns=["__row_number__"], errors="ignore"), use_container_width=True)
-
-    total = round(lines_df["total_linea"].sum(), 2)
-    profit = round(lines_df["ganancia_personal_linea"].sum(), 2)
-    tithing = round(lines_df["diezmo_linea"].sum(), 2)
-
-    big_red_amount("TOTAL A COBRAR", total)
-
-    c1, c2 = st.columns(2)
-    c1.metric("Ganancia personal", pesos(profit))
-    c2.metric("Diezmo", pesos(tithing))
-
-    with st.expander("Modificar pedido pendiente"):
-        st.write("**Agregar producto**")
-        product_names = products["producto"].tolist()
-
-        with st.form(f"add_to_pending_{pedido_id}"):
-            col1, col2 = st.columns([2, 1])
-            product = col1.selectbox("Producto", product_names, key=f"prod_pending_{pedido_id}")
-            quantity = col2.number_input("Cantidad", min_value=1, step=1, key=f"qty_pending_{pedido_id}")
-            note = st.text_input("Nota", placeholder="Opcional", key=f"note_pending_{pedido_id}")
-            add = st.form_submit_button("Agregar al pedido pendiente")
-
-        if add:
-            product_row = products[products["producto"] == product].iloc[0]
-            fecha = {
-                "fecha_hora": f"{order_date} {order_time}",
-                "fecha": order_date,
-                "hora": order_time,
-            }
-            append_line_to_pending_order(pedido_id, pedido_numero, fecha, product_row, quantity, note)
-            st.success("Producto agregado al pedido pendiente.")
-            st.rerun()
-
-        st.write("**Quitar producto**")
-        line_labels = []
-        label_to_row = {}
-
-        for _, row in lines_df.iterrows():
-            label = f"{row['producto']} x{row['cantidad']} | {pesos(row['total_linea'])}"
-            label = f"Fila {row['__row_number__']} - {label}"
-            line_labels.append(label)
-            label_to_row[label] = int(row["__row_number__"])
-
-        selected_line = st.selectbox("Producto a quitar del pedido", line_labels, key=f"remove_pending_{pedido_id}")
-
-        if st.button("Quitar producto seleccionado", key=f"btn_remove_pending_{pedido_id}"):
-            update_cell_by_header("pedidos", label_to_row[selected_line], "estado", "eliminado")
-            st.success("Producto quitado del pedido pendiente.")
-            st.rerun()
-
-        if st.button("Cancelar pedido completo", key=f"cancel_pending_{pedido_id}"):
-            update_pedido_estado(pedido_id, "cancelado")
-            st.success("Pedido cancelado.")
-            st.rerun()
-
-    st.divider()
-    st.subheader("Cobrar pedido")
-
-    big_red_amount("TOTAL PENDIENTE DE PAGO", total)
-
-    payment_date = datetime_inputs(f"pago_{pedido_id}", "Fecha y hora de pago")
-    method = st.radio(
-        "Método de pago",
-        ["Efectivo", "Tarjeta", "Transferencia", "Mixto"],
-        horizontal=True,
-        key=f"pay_method_{pedido_id}",
-    )
-
-    cash_amount = card_amount = transfer_amount = 0.0
-
-    if method == "Mixto":
-        st.caption("En pago mixto, la suma de efectivo + tarjeta + transferencia debe dar el total del pedido.")
-        col1, col2, col3 = st.columns(3)
-        cash_amount = col1.number_input("Efectivo", min_value=0.0, step=10.0, key=f"cash_{pedido_id}")
-        card_amount = col2.number_input("Tarjeta", min_value=0.0, step=10.0, key=f"card_{pedido_id}")
-        transfer_amount = col3.number_input("Transferencia", min_value=0.0, step=10.0, key=f"transfer_{pedido_id}")
-    else:
-        st.info(f"Se cobrará el total de {pesos(total)} como {method}.")
-
-    amounts = calculate_payment_amounts(total, method, cash_amount, card_amount, transfer_amount)
-
-    if amounts["card"] > 0:
-        st.warning(
-            f"Comisión de terminal 3.5% sobre tarjeta: {pesos(amounts['terminal_fee'])}. Neto recibido: {pesos(amounts['net_received'])}."
-        )
-    else:
-        st.info(f"Neto recibido: {pesos(amounts['net_received'])}.")
-
-    payment_note = st.text_input("Nota del pago", placeholder="Opcional", key=f"payment_note_{pedido_id}")
-
-    if st.button("Marcar como pagado", type="primary", key=f"pay_{pedido_id}"):
-        pay_pending_order(pedido_id, payment_date, method, amounts, payment_note)
-
-
-def page_registrar_pedido():
-    init_cart()
-    st.header("Registrar pedido")
-
-    products = load_active_products()
-    if products.empty:
-        st.warning("No hay productos activos.")
-        return
-
-    product_names = products["producto"].tolist()
-
-    tab_new, tab_pending = st.tabs(["Nuevo pedido", "Pedidos pendientes"])
-
-    with tab_new:
-        st.subheader("Venta rápida")
-        st.caption("Toca un botón para agregar 1 unidad al pedido nuevo.")
-
-        for i in range(0, len(product_names), 2):
-            cols = st.columns(2)
-            for j, col in enumerate(cols):
-                index = i + j
-                if index >= len(product_names):
-                    continue
-                product = product_names[index]
-                row = products[products["producto"] == product].iloc[0]
-                label = f"{product}\n{pesos(row['precio'])}"
-                if col.button(label, key=f"quick_{product}", use_container_width=True):
-                    add_product_to_cart(products, product, 1)
-                    st.rerun()
-
-        st.divider()
-        st.subheader("Agregar con cantidad")
-
-        with st.form("add_to_cart"):
-            col1, col2 = st.columns([2, 1])
-            product = col1.selectbox("Producto", product_names)
-            quantity = col2.number_input("Cantidad", min_value=1, step=1)
-            add = st.form_submit_button("Agregar al pedido nuevo")
-
-        if add:
-            add_product_to_cart(products, product, quantity)
-            st.rerun()
-
-        st.divider()
-        render_current_cart(products)
-
-    with tab_pending:
-        render_pending_orders(products)
-
-# -----------------------------
-# GASTOS LOCAL / INVENTARIO
-# -----------------------------
-
-def update_inventory(insumo, amount, unit):
-    insumo = insumo.strip()
-    if not insumo or amount == 0:
-        return
-
-    df = load_df("inventario")
-    records = []
-    updated = False
-
-    if not df.empty:
-        for _, row in df.iterrows():
-            current = str(row.get("insumo", "")).strip().lower()
-            if current == insumo.lower():
-                records.append({
-                    "insumo": row.get("insumo", insumo),
-                    "cantidad": round(to_float(row.get("cantidad", 0)) + amount, 2),
-                    "unidad": unit,
-                })
-                updated = True
-            else:
-                records.append({
-                    "insumo": row.get("insumo", ""),
-                    "cantidad": row.get("cantidad", 0),
-                    "unidad": row.get("unidad", ""),
-                })
-
-    if not updated:
-        records.append({"insumo": insumo, "cantidad": round(amount, 2), "unidad": unit})
-
-    replace_records("inventario", records)
-
-
-def page_gastos_inventario():
-    st.header("Gastos e inventario de Norte Brunch")
-
-    tab1, tab2 = st.tabs(["Registrar gasto", "Inventario"])
-
-    with tab1:
-        st.caption("Categorías simplificadas: insumos, local y transporte.")
-
-        with st.form("gasto_local_form"):
-            fecha = datetime_inputs("gasto_local", "Fecha y hora del gasto")
-
-            categoria = st.selectbox(
-                "Tipo de gasto de Norte Brunch",
-                ["insumos", "local", "transporte"],
-            )
-
-            previous_names = get_previous_values("gastos_local", "nombre")
-            nombre = autocomplete_or_new(
-                "Producto / gasto",
-                previous_names,
-                "local_product",
-                placeholder="Ej. pan, carne, renta, gas, Uber, gasolina",
-            )
-
-            cantidad = st.number_input("Cantidad", min_value=0.0, step=1.0)
-            unidad = st.text_input("Unidad", value="piezas")
-            costo = st.number_input("Costo total", min_value=0.0, step=10.0)
-            pagado_por = st.radio("Pagado por", ["Norte Brunch", "Personal/Familiar"], horizontal=True)
-            nota = st.text_input("Nota", placeholder="Opcional")
-            guardar = st.form_submit_button("Guardar gasto")
-
-        if guardar:
-            if not nombre.strip() or costo <= 0:
-                st.error("Falta nombre del producto/gasto o costo.")
-                return
-
-            tipo_movimiento = "Compra de insumo" if categoria == "insumos" else "Gasto del local"
-
-            append_record("gastos_local", {
-                **fecha,
-                "tipo_movimiento": tipo_movimiento,
-                "nombre": nombre.strip(),
-                "categoria": categoria,
-                "cantidad": cantidad,
-                "unidad": unidad,
-                "costo_total": costo,
-                "pagado_por": pagado_por,
-                "nota": nota,
-            })
-
-            saldos = get_saldos()
-            change_saldo(saldos, "total_gastos_negocio", costo)
-
-            if pagado_por == "Norte Brunch":
-                change_saldo(saldos, "dinero_norte_brunch", -costo)
-                change_saldo(saldos, "gastos_pagados_norte", costo)
-            else:
-                change_saldo(saldos, "gastos_pagados_personal", costo)
-                change_saldo(saldos, "inversion_personal_total", costo)
-                change_saldo(saldos, "deuda_inversion_personal", costo)
-                change_saldo(saldos, "dinero_familiar", -costo)
-                change_saldo(saldos, "gastos_familiares_totales", costo)
-                append_record("gastos_familiares", {
-                    **fecha,
-                    "tipo": "gasto",
-                    "categoria": "hogar",
-                    "producto": f"Norte Brunch - {nombre.strip()}",
-                    "monto": costo,
-                    "metodo_pago": "Personal/Familiar",
-                    "nota": "Gasto de Norte Brunch pagado con dinero personal/familiar",
-                })
-
-            save_saldos(saldos)
-
-            if categoria == "insumos":
-                update_inventory(nombre.strip(), cantidad, unidad)
-
-            st.success("Gasto guardado.")
-            st.rerun()
-
-    with tab2:
-        st.subheader("Inventario")
-        st.dataframe(load_df("inventario"), use_container_width=True)
-
-        with st.form("descontar_inventario"):
-            previous_items = get_previous_values("inventario", "insumo")
-            insumo = autocomplete_or_new(
-                "Insumo",
-                previous_items,
-                "inventory_item",
-                placeholder="Ej. pan, carne, queso",
-            )
-            cantidad_usada = st.number_input("Cantidad usada", min_value=0.0, step=1.0)
-            unidad = st.text_input("Unidad", value="piezas")
-            descontar = st.form_submit_button("Descontar")
-
-        if descontar:
-            update_inventory(insumo, -cantidad_usada, unidad)
-            st.success("Inventario actualizado.")
-            st.rerun()
-
-
-# -----------------------------
-# FINANZAS FAMILIARES
-# -----------------------------
-
-def page_finanzas_familiares():
-    st.header("Finanzas familiares")
-
-    saldos = get_saldos()
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Dinero familiar", pesos(saldos["dinero_familiar"]))
-    col2.metric("Ingresos familiares", pesos(saldos["ingresos_familiares_totales"]))
-    col3.metric("Gastos familiares", pesos(saldos["gastos_familiares_totales"]))
-
-    tab1, tab2 = st.tabs(["Registrar movimiento", "Reporte"])
-
-    with tab1:
-        st.caption("Gastos familiares: categoría Hogar. Ingresos manuales: solo Otros ingresos. Los pagos de Norte Brunch se registran automáticamente cuando te pagas.")
-
-        with st.form("movimiento_familiar_form"):
-            fecha = datetime_inputs("familia", "Fecha y hora del movimiento")
-            tipo = st.radio("Tipo", ["gasto", "ingreso"], horizontal=True)
-
-            if tipo == "gasto":
-                categoria = "hogar"
-                previous_products = get_previous_values("gastos_familiares", "producto")
-                producto = autocomplete_or_new(
-                    "Producto / gasto familiar",
-                    previous_products,
-                    "family_product",
-                    placeholder="Ej. leche, despensa, pañales, gas, internet",
-                )
-            else:
-                categoria = "otros ingresos"
-                producto = st.text_input("Origen del ingreso", value="Otros ingresos")
-
-            monto = st.number_input("Monto", min_value=0.0, step=50.0)
-            metodo_pago = st.selectbox("Método / origen", ["Efectivo", "Tarjeta", "Transferencia", "Otro"])
-            nota = st.text_input("Nota")
-            guardar = st.form_submit_button("Guardar movimiento")
-
-        if guardar:
-            if monto <= 0:
-                st.error("El monto debe ser mayor que cero.")
-                return
-            if not producto.strip():
-                st.error("Escribe el producto, gasto u origen.")
-                return
-
-            append_record("gastos_familiares", {
-                **fecha,
-                "tipo": tipo,
-                "categoria": categoria,
-                "producto": producto.strip(),
-                "monto": monto,
-                "metodo_pago": metodo_pago,
-                "nota": nota,
-            })
-
-            saldos = get_saldos()
-            if tipo == "ingreso":
-                change_saldo(saldos, "dinero_familiar", monto)
-                change_saldo(saldos, "ingresos_familiares_totales", monto)
-            else:
-                change_saldo(saldos, "dinero_familiar", -monto)
-                change_saldo(saldos, "gastos_familiares_totales", monto)
-
-            save_saldos(saldos)
-            st.success("Movimiento familiar guardado.")
-            st.rerun()
-
-    with tab2:
-        start, end = period_filter_ui("familia")
-        df = filter_date_range(load_df("gastos_familiares"), start, end)
-        df = to_numeric(df, ["monto"])
-
-        ingresos = df[df["tipo"] == "ingreso"]["monto"].sum() if not df.empty else 0
-        gastos = df[df["tipo"] == "gasto"]["monto"].sum() if not df.empty else 0
-        balance = ingresos - gastos
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Ingresos", pesos(ingresos))
-        c2.metric("Gastos", pesos(gastos))
-        c3.metric("Balance", pesos(balance))
-
-        if not df.empty:
-            st.subheader("Resumen por producto")
-            st.dataframe(df.groupby(["tipo", "categoria", "producto"])["monto"].sum().reset_index(), use_container_width=True)
-            st.subheader("Movimientos")
-            st.dataframe(df, use_container_width=True)
-
-
-# -----------------------------
-# REPORTES LOCAL Y CORTE
-# -----------------------------
-
-def page_reportes_local():
-    st.header("Reportes del local")
-
-    start_date, end_date = period_filter_ui("local")
-    ventas = filter_date_range(load_df("ventas"), start_date, end_date)
-    gastos = filter_date_range(load_df("gastos_local"), start_date, end_date)
-
-    ventas = to_numeric(ventas, [
-        "cantidad",
-        "total_linea",
-        "ganancia_personal_linea",
-        "dinero_norte_linea",
-        "diezmo_linea",
-        "monto_efectivo_linea",
-        "monto_tarjeta_linea",
-        "monto_transferencia_linea",
-        "comision_terminal_linea",
-        "total_neto_linea",
-    ])
-    gastos = to_numeric(gastos, ["costo_total"])
-    ventas = normalize_ventas_financials(ventas)
-
-    total_ventas = ventas["total_linea"].sum() if not ventas.empty else 0
-    total_recibido = ventas["total_neto_linea"].sum() if "total_neto_linea" in ventas.columns and not ventas.empty else total_ventas
-    total_comision = ventas["comision_terminal_linea"].sum() if "comision_terminal_linea" in ventas.columns and not ventas.empty else 0
-    total_ganancia = ventas["ganancia_personal_linea"].sum() if not ventas.empty else 0
-    total_diezmo = ventas["diezmo_linea"].sum() if "diezmo_linea" in ventas.columns and not ventas.empty else round(total_ganancia * TITHING_RATE, 2)
-    total_norte = ventas["dinero_norte_linea"].sum() if not ventas.empty else 0
-    total_gastos = gastos["costo_total"].sum() if not gastos.empty else 0
-    resultado = total_norte - total_gastos
-    margen = (resultado / total_ventas * 100) if total_ventas else 0
-
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Ventas brutas", pesos(total_ventas))
-    col2.metric("Neto recibido", pesos(total_recibido))
-    col3.metric("Comisión terminal", pesos(total_comision))
-    col4.metric("Gastos", pesos(total_gastos))
-
-    col5, col6, col7 = st.columns(3)
-    col5.metric("Ganancia personal", pesos(total_ganancia))
-    col6.metric("Diezmo", pesos(total_diezmo))
-    col7.metric("Para Norte Brunch", pesos(total_norte))
-
-    st.metric("Resultado neto del local", pesos(resultado), f"{margen:.2f}%")
-
-    if resultado < 0:
-        st.error("ROJO - El local perdió dinero en este periodo.")
-    elif margen < 20:
-        st.warning("AMARILLO - Hay ganancia, pero baja rentabilidad.")
-    else:
-        st.success("VERDE - Rentabilidad saludable.")
-
-    if not ventas.empty:
-        st.subheader("Ventas por producto")
-        st.dataframe(
-            ventas.groupby("producto").agg({
-                "cantidad": "sum",
-                "total_linea": "sum",
-                "ganancia_personal_linea": "sum",
-                "diezmo_linea": "sum",
-                "comision_terminal_linea": "sum",
-                "dinero_norte_linea": "sum",
-            }).reset_index(),
-            use_container_width=True,
-        )
-
-        st.subheader("Ventas por método de pago")
-        payment_summary = pd.DataFrame({
-            "método": ["Efectivo", "Tarjeta", "Transferencia"],
-            "monto": [
-                ventas["monto_efectivo_linea"].sum() if "monto_efectivo_linea" in ventas.columns else 0,
-                ventas["monto_tarjeta_linea"].sum() if "monto_tarjeta_linea" in ventas.columns else 0,
-                ventas["monto_transferencia_linea"].sum() if "monto_transferencia_linea" in ventas.columns else 0,
-            ],
-        })
-        st.dataframe(payment_summary, use_container_width=True)
-
-        ventas["dia_semana"] = ventas["dt"].dt.day_name().map(weekday_spanish)
-        best_day = ventas.groupby("dia_semana")["total_linea"].sum().sort_values(ascending=False)
-        if not best_day.empty:
-            st.info(f"Mejor día del periodo: **{best_day.index[0]}** con {pesos(best_day.iloc[0])}.")
-
-    if not gastos.empty:
-        st.subheader("Gastos por categoría")
-        st.dataframe(gastos.groupby("categoria")["costo_total"].sum().reset_index(), use_container_width=True)
-
-    with st.expander("Ver datos detallados"):
-        st.subheader("Ventas pagadas")
-        st.dataframe(ventas, use_container_width=True)
-        st.subheader("Gastos")
-        st.dataframe(gastos, use_container_width=True)
-
-
-def page_corte_caja():
-    st.header("Corte de caja")
-
-    selected_date = st.date_input("Fecha del corte", value=mx_now().date())
-    ventas = filter_date_range(load_df("ventas"), selected_date, selected_date)
-    gastos = filter_date_range(load_df("gastos_local"), selected_date, selected_date)
-
-    ventas = to_numeric(ventas, [
-        "total_linea",
-        "ganancia_personal_linea",
-        "dinero_norte_linea",
-        "diezmo_linea",
-        "monto_efectivo_linea",
-        "monto_tarjeta_linea",
-        "monto_transferencia_linea",
-        "comision_terminal_linea",
-        "total_neto_linea",
-    ])
-    gastos = to_numeric(gastos, ["costo_total"])
-    ventas = normalize_ventas_financials(ventas)
-
-    if ventas.empty:
-        st.warning("No hay ventas pagadas en esa fecha.")
-        return
-
-    total_ventas = ventas["total_linea"].sum()
-    total_recibido = ventas["total_neto_linea"].sum() if "total_neto_linea" in ventas.columns else total_ventas
-    total_comision = ventas["comision_terminal_linea"].sum() if "comision_terminal_linea" in ventas.columns else 0
-    ganancia = ventas["ganancia_personal_linea"].sum()
-    diezmo = ventas["diezmo_linea"].sum() if "diezmo_linea" in ventas.columns else round(ganancia * TITHING_RATE, 2)
-    dinero_norte = ventas["dinero_norte_linea"].sum()
-    gastos_total = gastos["costo_total"].sum() if not gastos.empty else 0
-
-    efectivo = ventas["monto_efectivo_linea"].sum() if "monto_efectivo_linea" in ventas.columns else 0
-    tarjeta = ventas["monto_tarjeta_linea"].sum() if "monto_tarjeta_linea" in ventas.columns else 0
-    transferencia = ventas["monto_transferencia_linea"].sum() if "monto_transferencia_linea" in ventas.columns else 0
-
-    gastos_pagados_norte = 0
-    if not gastos.empty and "pagado_por" in gastos.columns:
-        gastos_pagados_norte = gastos[
-            gastos["pagado_por"].astype(str).str.lower().str.contains("norte")
-        ]["costo_total"].sum()
-
-    efectivo_esperado = efectivo - gastos_pagados_norte
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Ventas brutas", pesos(total_ventas))
-    c2.metric("Neto recibido", pesos(total_recibido))
-    c3.metric("Comisión terminal", pesos(total_comision))
-    c4.metric("Gastos del día", pesos(gastos_total))
-
-    c5, c6, c7, c8 = st.columns(4)
-    c5.metric("Ganancia personal", pesos(ganancia))
-    c6.metric("Diezmo", pesos(diezmo))
-    c7.metric("Para Norte Brunch", pesos(dinero_norte))
-    c8.metric("Efectivo esperado", pesos(efectivo_esperado))
-
-    st.subheader("Resumen por método de pago")
-    st.dataframe(
-        pd.DataFrame({
-            "método": ["Efectivo", "Tarjeta", "Transferencia"],
-            "monto": [efectivo, tarjeta, transferencia],
-        }),
-        use_container_width=True,
-    )
-
-    with st.expander("Ver ventas y gastos del día"):
-        st.subheader("Ventas pagadas")
-        st.dataframe(ventas, use_container_width=True)
-        st.subheader("Gastos")
-        st.dataframe(gastos, use_container_width=True)
-
-
-# -----------------------------
-# PLANEACIÓN DE COMPRAS / REINVERSIÓN
-# -----------------------------
-
-def get_sales_for_days(days):
-    today = mx_now().date()
-    start = today - timedelta(days=days - 1)
-    ventas = filter_date_range(load_df("ventas"), start, today)
-    ventas = to_numeric(ventas, ["cantidad", "total_linea"])
-    return ventas, start, today
-
-
-def get_recipe_df():
-    recetas = load_df("recetas")
-    if recetas.empty:
-        return recetas
-
-    recetas = to_numeric(recetas, ["cantidad_por_producto", "costo_unitario"])
-    recetas["activo"] = recetas["activo"].astype(str).str.lower().replace("", "si")
-    recetas = recetas[recetas["activo"] != "no"].copy()
-    return recetas
-
-
-def get_inventory_lookup():
-    inventario = load_df("inventario")
-    lookup = {}
-
-    if inventario.empty:
-        return lookup
-
-    inventario = to_numeric(inventario, ["cantidad"])
-
-    for _, row in inventario.iterrows():
-        insumo = str(row.get("insumo", "")).strip().lower()
-        unidad = str(row.get("unidad", "")).strip().lower()
-        key = (insumo, unidad)
-        lookup[key] = lookup.get(key, 0) + to_float(row.get("cantidad", 0))
-
-    return lookup
-
-
-def build_shopping_forecast(ventas, days_analyzed, projection_days, safety_margin):
-    active_products = load_active_products()
-    recetas = get_recipe_df()
-
-    if active_products.empty:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), "No hay productos activos."
-
-    product_names = active_products["producto"].tolist()
-
-    if ventas.empty:
-        sold_summary = pd.DataFrame({
-            "producto": product_names,
-            "cantidad_vendida": [0 for _ in product_names],
-            "venta_total": [0 for _ in product_names],
-            "promedio_diario": [0 for _ in product_names],
-            "proyección_unidades": [0 for _ in product_names],
-            "estado": ["Sin ventas en el periodo" for _ in product_names],
-        })
-        return sold_summary, pd.DataFrame(), recetas, "No hay ventas pagadas en el periodo elegido."
-
-    by_product = ventas.groupby("producto").agg({
-        "cantidad": "sum",
-        "total_linea": "sum",
-    }).reset_index()
-
-    records = []
-    for product in product_names:
-        match = by_product[by_product["producto"] == product]
-        if match.empty:
-            qty = 0
-            total = 0
-        else:
-            qty = to_float(match.iloc[0]["cantidad"])
-            total = to_float(match.iloc[0]["total_linea"])
-
-        daily_avg = qty / max(days_analyzed, 1)
-        projected_units = daily_avg * projection_days * (1 + safety_margin)
-
-        if qty == 0:
-            status = "No se vendió"
-        elif daily_avg >= 5:
-            status = "Se mueve bien"
-        elif daily_avg >= 1:
-            status = "Se mueve poco"
-        else:
-            status = "Muy lento"
-
-        records.append({
-            "producto": product,
-            "cantidad_vendida": round(qty, 2),
-            "venta_total": round(total, 2),
-            "promedio_diario": round(daily_avg, 2),
-            "proyección_unidades": round(projected_units, 2),
-            "estado": status,
-        })
-
-    sold_summary = pd.DataFrame(records)
-
-    if recetas.empty:
-        return sold_summary, pd.DataFrame(), recetas, "Falta configurar la hoja Recetas."
-
-    inventory = get_inventory_lookup()
-    shopping = []
-
-    for _, product_row in sold_summary.iterrows():
-        product = product_row["producto"]
-        projected_units = to_float(product_row["proyección_unidades"])
-        recipe_lines = recetas[recetas["producto"] == product]
-
-        for _, recipe in recipe_lines.iterrows():
-            insumo = str(recipe.get("insumo", "")).strip()
-            unidad = str(recipe.get("unidad", "")).strip()
-            cantidad_por_producto = to_float(recipe.get("cantidad_por_producto", 0))
-            costo_unitario = to_float(recipe.get("costo_unitario", 0))
-
-            required_qty = projected_units * cantidad_por_producto
-            current_qty = inventory.get((insumo.lower(), unidad.lower()), 0)
-            buy_qty = max(required_qty - current_qty, 0)
-            estimated_cost = buy_qty * costo_unitario
-
-            shopping.append({
-                "producto_origen": product,
-                "insumo": insumo,
-                "unidad": unidad,
-                "cantidad_requerida": round(required_qty, 3),
-                "inventario_actual": round(current_qty, 3),
-                "cantidad_a_comprar": round(buy_qty, 3),
-                "costo_unitario": round(costo_unitario, 2),
-                "costo_estimado": round(estimated_cost, 2),
-            })
-
-    shopping_df = pd.DataFrame(shopping)
-
-    if not shopping_df.empty:
-        shopping_summary = shopping_df.groupby(["insumo", "unidad"]).agg({
-            "cantidad_requerida": "sum",
-            "inventario_actual": "max",
-            "cantidad_a_comprar": "sum",
-            "costo_estimado": "sum",
-        }).reset_index()
-        shopping_summary["cantidad_requerida"] = shopping_summary["cantidad_requerida"].round(3)
-        shopping_summary["cantidad_a_comprar"] = shopping_summary["cantidad_a_comprar"].round(3)
-        shopping_summary["costo_estimado"] = shopping_summary["costo_estimado"].round(2)
-    else:
-        shopping_summary = pd.DataFrame()
-
-    return sold_summary, shopping_summary, recetas, ""
-
-
-def page_planeacion_compras():
-    st.header("Planeación de compras y reinversión")
-    st.caption("La app analiza ventas pagadas, productos que se mueven o no, y calcula cuánto comprar para la siguiente semana.")
-
-    col1, col2, col3 = st.columns(3)
-    days_analyzed = col1.number_input("Días a analizar", min_value=1, max_value=90, value=14, step=1)
-    projection_days = col2.number_input("Días a proyectar", min_value=1, max_value=30, value=7, step=1)
-    margin_pct = col3.number_input("Margen extra de seguridad (%)", min_value=0, max_value=100, value=15, step=5)
-
-    ventas, start, end = get_sales_for_days(int(days_analyzed))
-    sold_summary, shopping_summary, recetas, message = build_shopping_forecast(
-        ventas,
-        int(days_analyzed),
-        int(projection_days),
-        float(margin_pct) / 100,
-    )
-
-    st.info(f"Periodo analizado: {start.strftime('%Y-%m-%d')} a {end.strftime('%Y-%m-%d')}. Proyección: próximos {int(projection_days)} días.")
-
-    if message:
-        st.warning(message)
-
-    if not sold_summary.empty:
-        st.subheader("Qué se vende y qué no")
-        st.dataframe(sold_summary, use_container_width=True)
-
-        not_sold = sold_summary[sold_summary["cantidad_vendida"] <= 0]
-        slow = sold_summary[sold_summary["estado"].isin(["Muy lento", "Se mueve poco"])]
-
-        if not not_sold.empty:
-            st.warning("Productos sin venta en el periodo: " + ", ".join(not_sold["producto"].tolist()))
-        if not slow.empty:
-            st.info("Productos lentos o con baja venta: " + ", ".join(slow["producto"].tolist()))
-
-    if not shopping_summary.empty:
-        total_to_spend = shopping_summary["costo_estimado"].sum()
-
-        st.subheader("Lista estimada de compras")
-        st.dataframe(shopping_summary, use_container_width=True)
-        big_red_amount("Dinero estimado para reinvertir en compras", total_to_spend)
-
-        st.subheader("Lectura rápida")
-        for _, row in shopping_summary.iterrows():
-            qty = to_float(row["cantidad_a_comprar"])
-            if qty > 0:
-                st.write(
-                    f"- Comprar **{qty:g} {row['unidad']}** de **{row['insumo']}** "
-                    f"≈ **{pesos(row['costo_estimado'])}**"
-                )
-    else:
-        st.info("Todavía no hay lista de compras porque faltan ventas o recetas.")
-
-    st.divider()
-    st.subheader("Configurar recetas e insumos")
-    st.caption("Edita aquí cuánto insumo usa cada producto y cuánto cuesta cada unidad. Esto alimenta la planeación.")
-
-    with st.expander("Ver recetas actuales"):
-        st.dataframe(recetas, use_container_width=True)
-
-    with st.form("receta_form"):
-        productos = load_active_products()["producto"].tolist()
-        producto = st.selectbox("Producto vendido", productos)
-        insumo = st.text_input("Insumo", placeholder="Ej. carne adobada, aguacate, pan")
-        cantidad = st.number_input("Cantidad usada por producto", min_value=0.0, step=0.01, format="%.3f")
-        unidad = st.selectbox("Unidad", ["kg", "pieza", "litro", "paquete", "otro"])
-        costo_unitario = st.number_input("Costo por unidad", min_value=0.0, step=1.0)
-        activo = st.selectbox("Activo", ["si", "no"])
-        guardar = st.form_submit_button("Agregar receta/insumo")
-
-    if guardar:
-        if not insumo.strip() or cantidad <= 0:
-            st.error("Falta insumo o cantidad.")
-            return
-
-        append_record("recetas", {
-            "producto": producto,
-            "insumo": insumo.strip().lower(),
-            "cantidad_por_producto": cantidad,
-            "unidad": unidad,
-            "costo_unitario": costo_unitario,
-            "activo": activo,
-        })
-        st.success("Receta agregada.")
-        st.rerun()
-
-
-# -----------------------------
-# SALDOS, INVERSIONES Y DIEZMO
-# -----------------------------
-
-def page_saldos_local():
-    st.header("Saldos del local")
-
-    saldos = get_saldos()
-    disponible_deuda = float(saldos["dinero_norte_brunch"]) - float(saldos["ganancia_pendiente_personal"])
-    status = calculate_investment_repayment_status(saldos)
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Dinero Norte Brunch", pesos(saldos["dinero_norte_brunch"]))
-    c2.metric("Ganancia pendiente para mí", pesos(saldos["ganancia_pendiente_personal"]))
-    c3.metric("Deuda de Norte Brunch hacia mí", pesos(saldos["deuda_inversion_personal"]))
-
-    c4, c5, c6 = st.columns(3)
-    c4.metric("Ganancia pagada", pesos(saldos["ganancia_pagada_personal"]))
-    c5.metric("Inversión recuperada", pesos(saldos["inversion_pagada_personal"]))
-    c6.metric("Disponible para deuda", pesos(disponible_deuda))
-
-    st.divider()
-    st.subheader("Total general de ventas")
-    g1, g2, g3 = st.columns(3)
-    g1.metric("Ventas totales brutas", pesos(saldos.get("ventas_totales_brutas", 0)))
-    g2.metric("Ventas netas recibidas", pesos(saldos.get("ventas_totales_netas", 0)))
-    g3.metric("Comisiones terminal", pesos(saldos.get("total_comisiones_terminal", 0)))
-
-    g4, g5, g6 = st.columns(3)
-    g4.metric("Para Norte Brunch", pesos(saldos.get("total_para_norte", 0)))
-    g5.metric("Para mi paga", pesos(saldos.get("total_para_paga_personal", 0)))
-    g6.metric("Para diezmo", pesos(saldos.get("total_para_diezmo", 0)))
-
-    if st.button("Recalcular totales generales desde Ventas"):
-        totals = recalculate_general_sales_saldos()
-        st.success(
-            "Totales recalculados: "
-            f"Ventas {pesos(totals['ventas_totales_brutas'])}, "
-            f"Norte {pesos(totals['total_para_norte'])}, "
-            f"Mi paga {pesos(totals['total_para_paga_personal'])}, "
-            f"Diezmo {pesos(totals['total_para_diezmo'])}."
-        )
-        st.rerun()
-
-    st.info("La deuda hacia ti se genera automáticamente cuando pagas gastos de Norte Brunch con dinero personal/familiar.")
-
-    if status["debt"] <= 0:
-        st.success("Norte Brunch no tiene deuda pendiente contigo.")
-    elif status["can_pay"]:
-        st.markdown(
-            f"""
-            <div class="nb-warning-card">
-                <b>Ya hay pago para recuperar inversión.</b><br>
-                Disponible estimado después de apartar tu ganancia: <b>{pesos(status['available'])}</b><br>
-                Deuda pendiente: <b>{pesos(status['debt'])}</b><br>
-                Abono sugerido: <b>{pesos(status['suggested_payment'])}</b>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    else:
-        st.warning(status["message"])
-
-
-def page_pago_personal():
-    st.header("Pago personal")
-
-    saldos = get_saldos()
-    frecuencia_actual = get_config_value("frecuencia_pago_personal", "semanal")
-    opciones = ["semanal", "quincenal", "mensual"]
-
-    st.subheader("Frecuencia de pago")
-    nueva_frecuencia = st.selectbox(
-        "Elige cada cuándo quieres pagarte",
-        opciones,
-        index=opciones.index(frecuencia_actual) if frecuencia_actual in opciones else 0,
-    )
-
-    if st.button("Guardar frecuencia de pago"):
-        set_config_value("frecuencia_pago_personal", nueva_frecuencia)
-        st.success("Frecuencia guardada.")
-        st.rerun()
-
-    next_date = get_next_personal_payment_date(nueva_frecuencia)
-    pending = float(saldos["ganancia_pendiente_personal"])
-
-    st.divider()
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Tu pago acumulado", pesos(pending))
-    c2.metric("Próxima fecha sugerida", next_date.strftime("%Y-%m-%d"))
-    c3.metric("Dinero Norte Brunch", pesos(saldos["dinero_norte_brunch"]))
-
-    if pending > 0:
-        big_green_amount("Pago personal disponible", pending)
-    else:
-        st.info("Todavía no hay ganancia pendiente para pagarte.")
-
-    fecha = datetime_inputs("pago_personal", "Fecha y hora del pago personal")
-
-    if st.button("Reclamar mi pago completo", type="primary"):
-        claim_personal_profit(fecha)
-        st.rerun()
-
-    st.divider()
-    st.subheader("Recuperación de inversión")
-
-    status = calculate_investment_repayment_status(get_saldos())
-    st.write(status["message"])
-
-    if status["debt"] > 0:
-        c4, c5, c6 = st.columns(3)
-        c4.metric("Deuda pendiente", pesos(status["debt"]))
-        c5.metric("Disponible estimado", pesos(status["available"]))
-        c6.metric("Abono sugerido", pesos(status["suggested_payment"]))
-
-    fecha_inv = datetime_inputs("abono_inversion", "Fecha y hora del abono de inversión")
-
-    if status["can_pay"]:
-        if st.button("Registrar abono sugerido para recuperar inversión", type="primary"):
-            repay_investment_suggested(fecha_inv)
-            st.rerun()
-    else:
-        st.info("El botón de recuperación aparecerá cuando haya al menos $10,000 disponibles o cuando la deuda final sea menor y ya pueda cubrirse.")
-
-
-def page_diezmo():
-    st.header("Diezmo")
-    st.info("El diezmo pendiente se calcula automáticamente como 10% de tu ganancia personal. Regla: cada torta deja $40 de ganancia personal, por lo tanto genera $4 de diezmo por torta.")
-
-    saldos = get_saldos()
-    frecuencia = get_config_value("frecuencia_diezmo", "mensual")
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Frecuencia", frecuencia)
-    c2.metric("Diezmo pendiente", pesos(saldos["diezmo_pendiente"]))
-    c3.metric("Diezmo pagado", pesos(saldos["diezmo_pagado"]))
-
-    nueva = st.selectbox(
-        "Frecuencia de pago",
-        ["semanal", "quincenal", "mensual"],
-        index=["semanal", "quincenal", "mensual"].index(frecuencia) if frecuencia in ["semanal", "quincenal", "mensual"] else 2,
-    )
-    if st.button("Guardar frecuencia"):
-        set_config_value("frecuencia_diezmo", nueva)
-        st.success("Frecuencia guardada.")
-        st.rerun()
-
-    st.divider()
-    st.subheader("Registrar pago de diezmo")
-
-    fecha = datetime_inputs("diezmo", "Fecha y hora del pago")
-    amount = st.number_input("Monto a pagar", min_value=0.0, step=10.0, value=float(saldos["diezmo_pendiente"]) if saldos["diezmo_pendiente"] > 0 else 0.0)
-    note = st.text_input("Nota")
-
-    if st.button("Pagar diezmo", type="primary"):
-        if amount <= 0:
-            st.error("El monto debe ser mayor que cero.")
-            return
-        if amount > saldos["diezmo_pendiente"]:
-            st.error("No tienes tanto diezmo pendiente.")
-            return
-        if amount > saldos["dinero_familiar"]:
-            st.error("No hay suficiente dinero familiar.")
-            return
-
-        change_saldo(saldos, "dinero_familiar", -amount)
-        change_saldo(saldos, "gastos_familiares_totales", amount)
-        change_saldo(saldos, "diezmo_pendiente", -amount)
-        change_saldo(saldos, "diezmo_pagado", amount)
-        save_saldos(saldos)
-
-        append_record("diezmos", {**fecha, "monto": amount, "frecuencia": frecuencia, "nota": note})
-        append_record("gastos_familiares", {
-            **fecha,
-            "tipo": "gasto",
-            "categoria": "hogar",
-            "producto": "Diezmo",
-            "monto": amount,
-            "metodo_pago": "Efectivo/Transferencia",
-            "nota": "Pago de diezmo",
-        })
-
-        st.success("Diezmo registrado.")
-        st.rerun()
-
-    st.divider()
-    start, end = period_filter_ui("diezmo_reporte")
-    df = filter_date_range(load_df("diezmos"), start, end)
-    df = to_numeric(df, ["monto"])
-    st.metric("Diezmo pagado en el periodo", pesos(df["monto"].sum() if not df.empty else 0))
-    st.dataframe(df, use_container_width=True)
-
-
-# -----------------------------
-# APP
-# -----------------------------
-
 def main():
-    st.set_page_config(page_title=APP_TITLE, page_icon="🥪", layout="wide")
-    apply_branding()
-    render_brand_header()
-    st.caption("Zona horaria: México / America/Mexico_City")
+    st.set_page_config(page_title=APP_TITLE, page_icon="🥪", layout="centered")
+    apply_mobile_style()
+    render_header()
 
     if not check_password():
-        st.stop()
+        return
 
     try:
         setup_workbook()
-        ensure_required_product_prices()
-    except Exception as error:
-        st.error("No se pudo conectar con Google Sheets.")
-        st.write("Revisa tus secrets, el permiso del service account y la cuota de Google Sheets.")
-        st.exception(error)
+    except Exception:
+        st.error("No se pudo conectar con Google Sheets. Revisa permisos, Secrets o cuota.")
         st.stop()
 
-    if st.sidebar.button("Cerrar sesión"):
-        st.session_state["authenticated"] = False
+    if st.sidebar.button("Actualizar datos"):
+        clear_cache()
         st.rerun()
 
     page = st.sidebar.radio(
         "Menú",
-        [
-            "Registrar pedido",
-            "Corte de caja",
-            "Reportes del local",
-            "Planeación de compras",
-            "Saldos del local",
-            "Pago personal",
-            "Gastos e inventario",
-            "Finanzas familiares",
-            "Diezmo",
-            "Productos",
-        ],
+        ["Venta", "Gastos", "Saldo y deuda", "Pago personal", "Productos", "Reportes"],
     )
 
-    if page == "Registrar pedido":
-        page_registrar_pedido()
-    elif page == "Corte de caja":
-        page_corte_caja()
-    elif page == "Reportes del local":
-        page_reportes_local()
-    elif page == "Planeación de compras":
-        page_planeacion_compras()
-    elif page == "Saldos del local":
-        page_saldos_local()
+    if page == "Venta":
+        page_venta()
+    elif page == "Gastos":
+        page_gastos()
+    elif page == "Saldo y deuda":
+        page_saldos()
     elif page == "Pago personal":
         page_pago_personal()
-    elif page == "Gastos e inventario":
-        page_gastos_inventario()
-    elif page == "Finanzas familiares":
-        page_finanzas_familiares()
-    elif page == "Diezmo":
-        page_diezmo()
     elif page == "Productos":
         page_productos()
+    elif page == "Reportes":
+        page_reportes()
 
 
 if __name__ == "__main__":
