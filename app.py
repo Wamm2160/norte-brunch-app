@@ -1,6 +1,7 @@
 
 import base64
 import calendar
+import re
 import time
 import uuid
 from datetime import datetime, date, time as dtime, timedelta
@@ -15,7 +16,7 @@ from gspread.exceptions import APIError
 
 
 APP_TITLE = "Norte Brunch"
-TIMEZONE = ZoneInfo("America/Mexico_City")
+TZ = ZoneInfo("America/Mexico_City")
 CARD_FEE_RATE = 0.035
 TITHING_RATE = 0.10
 DEBT_ALERT_MIN_BALANCE = 10000
@@ -76,12 +77,16 @@ NUMERIC_MOVEMENT_COLUMNS = [
 ]
 
 
-# -----------------------------
+# -------------------------------------------------
 # UTILIDADES
-# -----------------------------
+# -------------------------------------------------
 
-def mx_now():
-    return datetime.now(TIMEZONE)
+def now_mx():
+    return datetime.now(TZ)
+
+
+def new_id():
+    return str(uuid.uuid4())
 
 
 def pesos(value):
@@ -92,33 +97,36 @@ def pesos(value):
     return f"${value:,.2f} MXN"
 
 
-def money_text_input(label, key, value="", placeholder="Ej. 202.50"):
-    """Campo de dinero simple para celular.
+def parse_money(value):
+    """Convierte texto de dinero a float.
 
-    Evita st.number_input porque en celular puede obligar a confirmar
-    con Enter varias veces y muestra 0.00 por default.
+    Acepta:
+    202
+    202.5
+    202.50
+    202,50
+    $202.50
+    1,202.50
+    1.202,50
     """
-    if value in (None, ""):
-        default = ""
-    else:
-        default = str(value)
-
-    return st.text_input(label, value=default, placeholder=placeholder, key=key)
-
-
-def to_float(value):
     if value is None:
         return 0.0
 
-    text = str(value).replace("$", "").replace("MXN", "").strip()
+    text = str(value).strip()
+    text = text.replace("$", "").replace("MXN", "").replace("mxn", "")
     text = text.replace(" ", "")
 
-    if text == "":
+    if not text:
         return 0.0
 
-    # Acepta formatos mexicanos y simples:
-    # 202.5, 202.50, 202,50, 1,202.50, 1.202,50
+    # Dejar solo números, coma, punto y signo negativo.
+    text = re.sub(r"[^0-9,.\-]", "", text)
+
+    if not text:
+        return 0.0
+
     if "," in text and "." in text:
+        # El último separador suele ser decimal.
         if text.rfind(",") > text.rfind("."):
             # 1.202,50 -> 1202.50
             text = text.replace(".", "").replace(",", ".")
@@ -130,25 +138,21 @@ def to_float(value):
         text = text.replace(",", ".")
 
     try:
-        return float(text)
+        return round(float(text), 2)
     except Exception:
         return 0.0
 
 
-def safe_int(value, default=0):
+def parse_int(value, default=0):
     try:
         return int(float(value))
     except Exception:
         return default
 
 
-def make_id():
-    return str(uuid.uuid4())
-
-
-def datetime_record(dt=None):
+def record_datetime(dt=None):
     if dt is None:
-        dt = mx_now()
+        dt = now_mx()
     return {
         "fecha_hora": dt.strftime("%Y-%m-%d %H:%M:%S"),
         "fecha": dt.strftime("%Y-%m-%d"),
@@ -156,33 +160,38 @@ def datetime_record(dt=None):
     }
 
 
-def selected_datetime_record(prefix, label="Fecha y hora", default_dt=None):
+def datetime_picker(prefix, label="Fecha y hora", default_dt=None):
     st.caption(label)
     if default_dt is None:
-        default_dt = mx_now()
-
+        default_dt = now_mx()
     c1, c2 = st.columns(2)
-    selected_date = c1.date_input("Fecha", value=default_dt.date(), key=f"{prefix}_fecha")
-    selected_time = c2.time_input("Hora", value=default_dt.time().replace(second=0, microsecond=0), key=f"{prefix}_hora")
-    dt = datetime.combine(selected_date, selected_time).replace(tzinfo=TIMEZONE)
-    return datetime_record(dt)
+    selected_date = c1.date_input("Fecha", value=default_dt.date(), key=f"{prefix}_date")
+    selected_time = c2.time_input("Hora", value=default_dt.time().replace(second=0, microsecond=0), key=f"{prefix}_time")
+    dt = datetime.combine(selected_date, selected_time).replace(tzinfo=TZ)
+    return record_datetime(dt)
+
+
+def money_input(label, key, value="", placeholder="Ej. 202.50"):
+    if value is None:
+        value = ""
+    return st.text_input(label, value=str(value), placeholder=placeholder, key=key)
 
 
 def is_saturday_after_6pm():
-    now = mx_now()
-    return now.weekday() == 5 and now.time() >= dtime(18, 0)
+    n = now_mx()
+    return n.weekday() == 5 and n.time() >= dtime(18, 0)
 
 
 def next_saturday_6pm():
-    now = mx_now()
-    days_ahead = (5 - now.weekday()) % 7
-    candidate = datetime.combine(now.date() + timedelta(days=days_ahead), dtime(18, 0), tzinfo=TIMEZONE)
-    if candidate <= now:
+    n = now_mx()
+    days_ahead = (5 - n.weekday()) % 7
+    candidate = datetime.combine(n.date() + timedelta(days=days_ahead), dtime(18, 0), tzinfo=TZ)
+    if candidate <= n:
         candidate += timedelta(days=7)
     return candidate
 
 
-def weekday_name_es(value):
+def weekday_es(value):
     names = {
         0: "Lunes",
         1: "Martes",
@@ -203,13 +212,11 @@ def month_end(day):
 
 
 def period_dates(kind):
-    today = mx_now().date()
-
+    today = now_mx().date()
     if kind == "Hoy":
         return today, today
     if kind == "Semana":
-        start = today - timedelta(days=today.weekday())
-        return start, today
+        return today - timedelta(days=today.weekday()), today
     if kind == "Quincena":
         if today.day <= 15:
             return today.replace(day=1), today.replace(day=15)
@@ -218,18 +225,16 @@ def period_dates(kind):
         return today.replace(day=1), month_end(today)
     if kind == "Año":
         return today.replace(month=1, day=1), today.replace(month=12, day=31)
-
     return today, today
 
 
 def period_picker(prefix):
-    today = mx_now().date()
+    today = now_mx().date()
     option = st.selectbox(
         "Periodo",
         ["Hoy", "Semana", "Quincena", "Mes", "Año", "Personalizado"],
-        key=f"{prefix}_periodo",
+        key=f"{prefix}_period",
     )
-
     if option != "Personalizado":
         return period_dates(option)
 
@@ -239,11 +244,11 @@ def period_picker(prefix):
     return start, end
 
 
-# -----------------------------
+# -------------------------------------------------
 # ESTILO
-# -----------------------------
+# -------------------------------------------------
 
-def apply_mobile_style():
+def apply_style():
     st.markdown(
         """
         <style>
@@ -260,11 +265,9 @@ def apply_mobile_style():
             margin-bottom: .25rem;
         }
         .nb-logo-wrap img {
-            max-width: 220px;
-            width: min(64vw, 220px);
+            max-width: 210px;
+            width: min(64vw, 210px);
             height: auto;
-            display: block;
-            margin: 0 auto;
         }
         .nb-subtitle {
             text-align: center;
@@ -288,7 +291,7 @@ def apply_mobile_style():
         }
         .nb-total .amount {
             font-weight: 1000;
-            font-size: 2.45rem;
+            font-size: 2.3rem;
             line-height: 1;
             color: #D32F2F;
         }
@@ -307,7 +310,7 @@ def apply_mobile_style():
         }
         .nb-paid .amount {
             font-weight: 1000;
-            font-size: 2.25rem;
+            font-size: 2.2rem;
             line-height: 1;
             color: #2E7D32;
         }
@@ -323,11 +326,11 @@ def apply_mobile_style():
             padding: .7rem;
             background: #FFFFFF;
         }
-        label, p, div, span, h1, h2, h3 {
-            color: #1F2933;
-        }
         input, textarea {
             color: #111827 !important;
+        }
+        label, p, div, span, h1, h2, h3 {
+            color: #1F2933;
         }
         </style>
         """,
@@ -335,14 +338,11 @@ def apply_mobile_style():
     )
 
 
-def render_header():
-    logo_path = Path("logo.png")
-    if logo_path.exists():
-        b64 = base64.b64encode(logo_path.read_bytes()).decode("utf-8")
-        st.markdown(
-            f'<div class="nb-logo-wrap"><img src="data:image/png;base64,{b64}" alt="Norte Brunch"></div>',
-            unsafe_allow_html=True,
-        )
+def header():
+    logo = Path("logo.png")
+    if logo.exists():
+        b64 = base64.b64encode(logo.read_bytes()).decode("utf-8")
+        st.markdown(f'<div class="nb-logo-wrap"><img src="data:image/png;base64,{b64}"></div>', unsafe_allow_html=True)
     else:
         st.title("Norte Brunch")
     st.markdown('<div class="nb-subtitle">Control simple del negocio</div>', unsafe_allow_html=True)
@@ -372,9 +372,9 @@ def big_paid(label, amount):
     )
 
 
-# -----------------------------
+# -------------------------------------------------
 # GOOGLE SHEETS
-# -----------------------------
+# -------------------------------------------------
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -385,13 +385,9 @@ SCOPES = [
 @st.cache_resource
 def get_client():
     if "gcp_service_account" not in st.secrets:
-        st.error("Falta configurar [gcp_service_account] en Streamlit Secrets.")
+        st.error("Falta [gcp_service_account] en Streamlit Secrets.")
         st.stop()
-
-    creds = Credentials.from_service_account_info(
-        dict(st.secrets["gcp_service_account"]),
-        scopes=SCOPES,
-    )
+    creds = Credentials.from_service_account_info(dict(st.secrets["gcp_service_account"]), scopes=SCOPES)
     return gspread.authorize(creds)
 
 
@@ -406,7 +402,7 @@ def get_workbook():
         spreadsheet_id = st.secrets.get("app", {}).get("spreadsheet_id", "")
 
     if not spreadsheet_id:
-        st.error("Falta spreadsheet_id en Streamlit Secrets. Puedes usar [google_sheet] spreadsheet_id como antes.")
+        st.error("Falta spreadsheet_id en Secrets. Puedes usar [google_sheet] spreadsheet_id.")
         st.stop()
 
     return client.open_by_key(str(spreadsheet_id).strip())
@@ -428,15 +424,15 @@ def google_call(func, *args, **kwargs):
 
 @st.cache_resource
 def get_ws(sheet_key):
-    workbook = get_workbook()
+    wb = get_workbook()
     info = SHEETS[sheet_key]
     try:
-        return google_call(workbook.worksheet, info["name"])
+        return google_call(wb.worksheet, info["name"])
     except Exception:
         ws = google_call(
-            workbook.add_worksheet,
+            wb.add_worksheet,
             title=info["name"],
-            rows=1200,
+            rows=1500,
             cols=max(len(info["headers"]) + 4, 12),
         )
         google_call(ws.append_row, info["headers"], value_input_option="USER_ENTERED")
@@ -456,19 +452,17 @@ def ensure_headers(sheet_key):
             google_call(ws.append_rows, SHEETS[sheet_key]["default_rows"], value_input_option="USER_ENTERED")
         return
 
-    current = [str(h).strip() for h in values[0]]
+    headers = [str(h).strip() for h in values[0]]
     changed = False
-
-    for header in expected:
-        if header not in current:
-            current.append(header)
+    for h in expected:
+        if h not in headers:
+            headers.append(h)
             changed = True
-
     if changed:
-        google_call(ws.update, "1:1", [current])
+        google_call(ws.update, "1:1", [headers])
 
 
-def setup_workbook():
+def setup_sheets():
     for key in SHEETS:
         get_ws(key)
         ensure_headers(key)
@@ -481,7 +475,7 @@ def clear_cache():
         pass
 
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=60)
 def load_df(sheet_key):
     ws = get_ws(sheet_key)
     values = google_call(ws.get_all_values)
@@ -490,13 +484,13 @@ def load_df(sheet_key):
 
     headers = [str(h).strip() for h in values[0]]
     rows = values[1:]
-    cleaned = []
 
+    clean = []
     for row in rows:
         padded = row + [""] * (len(headers) - len(row))
-        cleaned.append(padded[:len(headers)])
+        clean.append(padded[:len(headers)])
 
-    return pd.DataFrame(cleaned, columns=headers)
+    return pd.DataFrame(clean, columns=headers)
 
 
 def append_record(sheet_key, record):
@@ -511,11 +505,10 @@ def append_record(sheet_key, record):
 def append_records(sheet_key, records):
     if not records:
         return
-
     ws = get_ws(sheet_key)
     ensure_headers(sheet_key)
     headers = google_call(ws.row_values, 1)
-    rows = [[record.get(h, "") for h in headers] for record in records]
+    rows = [[r.get(h, "") for h in headers] for r in records]
     google_call(ws.append_rows, rows, value_input_option="USER_ENTERED")
     clear_cache()
 
@@ -525,17 +518,15 @@ def replace_records(sheet_key, records):
     headers = SHEETS[sheet_key]["headers"]
     google_call(ws.clear)
     google_call(ws.append_row, headers, value_input_option="USER_ENTERED")
-    rows = [[record.get(h, "") for h in headers] for record in records]
-
-    if rows:
+    if records:
+        rows = [[r.get(h, "") for h in headers] for r in records]
         google_call(ws.append_rows, rows, value_input_option="USER_ENTERED")
-
     clear_cache()
 
 
-# -----------------------------
-# PRODUCTOS
-# -----------------------------
+# -------------------------------------------------
+# NORMALIZAR DATA
+# -------------------------------------------------
 
 def load_products(active_only=True):
     df = load_df("productos")
@@ -544,17 +535,15 @@ def load_products(active_only=True):
 
     df = df.copy()
 
-    for col in NUMERIC_PRODUCT_COLUMNS:
-        if col not in df.columns:
-            df[col] = 0
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype(float)
-
     for col in SHEETS["productos"]["headers"]:
         if col not in df.columns:
             df[col] = ""
 
+    for col in NUMERIC_PRODUCT_COLUMNS:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype(float)
+
     df["producto"] = df["producto"].astype(str).str.strip()
-    df["activo"] = df["activo"].astype(str).str.lower().replace("", "si")
+    df["activo"] = df["activo"].astype(str).str.lower().str.strip().replace("", "si")
     df = df[df["producto"] != ""]
 
     if active_only:
@@ -568,57 +557,57 @@ def save_products(df):
     seen = set()
 
     for _, row in df.iterrows():
-        product = str(row.get("producto", "")).strip()
-        if not product:
+        name = str(row.get("producto", "")).strip()
+        if not name:
             continue
-
-        key = product.lower()
+        key = name.lower()
         if key in seen:
             continue
-
         seen.add(key)
 
         records.append({
-            "producto": product,
-            "precio": to_float(row.get("precio", 0)),
-            "ganancia_personal": to_float(row.get("ganancia_personal", 0)),
+            "producto": name,
+            "precio": parse_money(row.get("precio", 0)),
+            "ganancia_personal": parse_money(row.get("ganancia_personal", 0)),
             "activo": str(row.get("activo", "si")).strip().lower() or "si",
         })
 
     replace_records("productos", records)
 
 
-def calculate_line(product, quantity, price, profit, card_fee=0):
-    quantity = safe_int(quantity, 0)
-    price = to_float(price)
-    profit = to_float(profit)
-    card_fee = to_float(card_fee)
+def load_orders():
+    df = load_df("pedidos")
+    if df.empty:
+        return pd.DataFrame(columns=SHEETS["pedidos"]["headers"])
 
-    total = round(quantity * price, 2)
-    profit_line = round(quantity * profit, 2)
-    norte = round(total - profit_line - card_fee, 2)
-    net = round(total - card_fee, 2)
+    df = df.copy()
+    for col in SHEETS["pedidos"]["headers"]:
+        if col not in df.columns:
+            df[col] = ""
 
-    return {
-        "producto": product,
-        "cantidad": quantity,
-        "precio_unitario": price,
-        "ganancia_personal_unitaria": profit,
-        "total_linea": total,
-        "ganancia_personal_linea": profit_line,
-        "dinero_norte_linea": norte,
-        "comision_terminal_linea": card_fee,
-        "total_neto_linea": net,
-    }
+    for col in NUMERIC_ORDER_COLUMNS:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype(float)
+
+    df["estado"] = df["estado"].astype(str).str.lower().str.strip()
+    return df
 
 
-# -----------------------------
-# DATAFRAMES
-# -----------------------------
+def save_orders(df):
+    records = []
+    for _, row in df.iterrows():
+        record = {}
+        for h in SHEETS["pedidos"]["headers"]:
+            val = row.get(h, "")
+            if pd.isna(val):
+                val = ""
+            record[h] = val
+        records.append(record)
+    replace_records("pedidos", records)
+
 
 def normalize_movements(df):
     if df.empty:
-        return df
+        return pd.DataFrame(columns=SHEETS["movimientos"]["headers"])
 
     df = df.copy()
 
@@ -637,59 +626,91 @@ def normalize_movements(df):
     df["fecha_dt"] = pd.to_datetime(df["fecha"], errors="coerce")
     df["fecha_date"] = df["fecha_dt"].dt.date
     df["weekday"] = df["fecha_dt"].dt.weekday
-    df["dia_semana"] = df["weekday"].apply(lambda x: weekday_name_es(x) if pd.notna(x) else "")
+    df["dia_semana"] = df["weekday"].apply(lambda x: weekday_es(x) if pd.notna(x) else "")
 
     return df
 
 
-def movimientos_df():
+def movements_df():
     return normalize_movements(load_df("movimientos"))
 
 
 def ventas_df():
-    df = movimientos_df()
-    if df.empty:
-        return df
-    return df[df["tipo"] == "venta"].copy()
+    df = movements_df()
+    return df[df["tipo"] == "venta"].copy() if not df.empty else df
 
 
 def gastos_df(include_void=False):
-    df = movimientos_df()
+    df = movements_df()
     if df.empty:
         return df
-
     if include_void:
         return df[df["tipo"].isin(["gasto", "gasto_anulado"])].copy()
-
     gastos = df[df["tipo"] == "gasto"].copy()
     return gastos[gastos["monto"] > 0].copy()
 
 
-def debt_df():
-    df = movimientos_df()
+def debt_movements_df():
+    df = movements_df()
     if df.empty:
         return df
 
-    tipo = df["tipo"]
-    personal_expenses = (tipo == "gasto") & (df["pagado_con"].str.lower() == "mi dinero personal")
-    debt_payments = tipo == "pago_deuda"
-    debt_adjustments = tipo == "ajuste_deuda"
+    personal_expense = (df["tipo"] == "gasto") & (df["pagado_con"].str.lower() == "mi dinero personal")
+    debt_payment = df["tipo"] == "pago_deuda"
+    debt_adjust = df["tipo"] == "ajuste_deuda"
 
-    return df[personal_expenses | debt_payments | debt_adjustments].copy()
+    return df[personal_expense | debt_payment | debt_adjust].copy()
 
 
-def filter_by_dates(df, start_date, end_date):
+def filter_dates(df, start, end):
     if df.empty or "fecha_date" not in df.columns:
         return df
-    return df[(df["fecha_date"] >= start_date) & (df["fecha_date"] <= end_date)].copy()
+    return df[(df["fecha_date"] >= start) & (df["fecha_date"] <= end)].copy()
 
 
-# -----------------------------
-# SALDOS CALCULADOS DESDE MOVIMIENTOS
-# -----------------------------
+def save_movements_df(df):
+    records = []
+    for _, row in df.iterrows():
+        record = {}
+        for h in SHEETS["movimientos"]["headers"]:
+            val = row.get(h, "")
+            if pd.isna(val):
+                val = ""
+            record[h] = val
+        records.append(record)
+    replace_records("movimientos", records)
+
+
+# -------------------------------------------------
+# CÁLCULOS
+# -------------------------------------------------
+
+def calculate_line(product, qty, price, profit, card_fee=0):
+    qty = parse_int(qty, 0)
+    price = parse_money(price)
+    profit = parse_money(profit)
+    card_fee = parse_money(card_fee)
+
+    total = round(qty * price, 2)
+    profit_line = round(qty * profit, 2)
+    net = round(total - card_fee, 2)
+    norte = round(total - profit_line - card_fee, 2)
+
+    return {
+        "producto": product,
+        "cantidad": qty,
+        "precio_unitario": price,
+        "ganancia_personal_unitaria": profit,
+        "total_linea": total,
+        "ganancia_personal_linea": profit_line,
+        "dinero_norte_linea": norte,
+        "comision_terminal_linea": card_fee,
+        "total_neto_linea": net,
+    }
+
 
 def calculate_balances():
-    df = movimientos_df()
+    df = movements_df()
 
     result = {
         "saldo_norte": 0.0,
@@ -711,12 +732,12 @@ def calculate_balances():
         return result
 
     tipo = df["tipo"]
-    pagado_con = df["pagado_con"].str.lower()
+    paid = df["pagado_con"].str.lower()
 
     ventas = df[tipo == "venta"]
     gastos = df[tipo == "gasto"]
-    gastos_norte = gastos[pagado_con == "dinero de norte brunch"]
-    gastos_personal = gastos[pagado_con == "mi dinero personal"]
+    gastos_norte = gastos[paid == "dinero de norte brunch"]
+    gastos_personal = gastos[paid == "mi dinero personal"]
     pagos_personales = df[tipo == "pago_personal"]
     pagos_deuda = df[tipo == "pago_deuda"]
     ajustes_saldo = df[tipo == "ajuste_saldo"]
@@ -724,7 +745,7 @@ def calculate_balances():
 
     ventas_brutas = float(ventas["total_linea"].sum())
     ventas_netas = float(ventas["total_neto_linea"].sum())
-    ganancias = float(ventas["ganancia_personal_linea"].sum())
+    profit_total = float(ventas["ganancia_personal_linea"].sum())
     para_norte = float(ventas["dinero_norte_linea"].sum())
     comisiones = float(ventas["comision_terminal_linea"].sum())
 
@@ -739,11 +760,11 @@ def calculate_balances():
 
     saldo = ventas_netas - gastos_norte_total - pagos_personales_total - pagos_deuda_total + ajustes_saldo_total
     deuda = gastos_personal_total + ajustes_deuda_total - pagos_deuda_total
-    paga_pendiente = ganancias - pagos_personales_total
+    paga_pendiente = profit_total - pagos_personales_total
 
-    affecting_saldo = df[tipo.isin(["venta", "gasto", "pago_personal", "pago_deuda", "ajuste_saldo"])].copy()
-    if not affecting_saldo.empty:
-        last = pd.to_datetime(affecting_saldo["fecha_hora"], errors="coerce").max()
+    affecting = df[tipo.isin(["venta", "gasto", "pago_personal", "pago_deuda", "ajuste_saldo"])]
+    if not affecting.empty:
+        last = pd.to_datetime(affecting["fecha_hora"], errors="coerce").max()
         if pd.notna(last):
             result["ultimo_movimiento_saldo"] = last.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -761,7 +782,6 @@ def calculate_balances():
         "comisiones": round(comisiones, 2),
         "pagos_deuda": round(pagos_deuda_total, 2),
     })
-
     return result
 
 
@@ -774,77 +794,42 @@ def debt_alert():
 
     last_text = bal.get("ultimo_movimiento_saldo", "")
     if not last_text:
-        return True, "Hay saldo suficiente y no hay fecha de último movimiento."
+        return True, "Hay saldo suficiente y no hay último movimiento."
 
     try:
-        last_dt = datetime.strptime(last_text, "%Y-%m-%d %H:%M:%S").replace(tzinfo=TIMEZONE)
-        days = (mx_now() - last_dt).days
+        last_dt = datetime.strptime(last_text, "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ)
+        days = (now_mx() - last_dt).days
     except Exception:
         return True, "Hay saldo suficiente."
 
     if days >= 7:
         return True, f"El saldo lleva {days} días sin movimiento."
-    return False, f"El último movimiento fue {last_text}."
+    return False, f"Último movimiento: {last_text}."
 
 
-# -----------------------------
+# -------------------------------------------------
 # PEDIDOS
-# -----------------------------
-
-def load_pedidos():
-    df = load_df("pedidos")
-    if df.empty:
-        return pd.DataFrame(columns=SHEETS["pedidos"]["headers"])
-
-    df = df.copy()
-
-    for col in SHEETS["pedidos"]["headers"]:
-        if col not in df.columns:
-            df[col] = ""
-
-    for col in NUMERIC_ORDER_COLUMNS:
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
-
-    df["estado"] = df["estado"].astype(str).str.lower().str.strip()
-    return df
-
-
-def save_pedidos_df(df):
-    records = []
-    for _, row in df.iterrows():
-        record = {}
-        for h in SHEETS["pedidos"]["headers"]:
-            value = row.get(h, "")
-            if pd.isna(value):
-                value = ""
-            record[h] = value
-        records.append(record)
-    replace_records("pedidos", records)
-
+# -------------------------------------------------
 
 def next_order_number():
-    today_text = mx_now().strftime("%Y-%m-%d")
-    df = load_pedidos()
+    today = now_mx().strftime("%Y-%m-%d")
+    df = load_orders()
     if df.empty:
         return 1
-
-    today_orders = df[df["fecha"].astype(str) == today_text]
-    if today_orders.empty:
+    today_rows = df[df["fecha"].astype(str) == today]
+    if today_rows.empty:
         return 1
-
-    nums = pd.to_numeric(today_orders["pedido_numero"], errors="coerce").fillna(0)
-    return int(nums.max()) + 1
+    return int(pd.to_numeric(today_rows["pedido_numero"], errors="coerce").fillna(0).max()) + 1
 
 
-def create_pending_order():
-    rec = datetime_record()
-    pedido_id = make_id()
-    pedido_num = next_order_number()
-
+def create_order():
+    rec = record_datetime()
+    pedido_id = new_id()
+    num = next_order_number()
     append_record("pedidos", {
         **rec,
         "pedido_id": pedido_id,
-        "pedido_numero": pedido_num,
+        "pedido_numero": num,
         "estado": "pendiente",
         "producto": "",
         "cantidad": 0,
@@ -855,58 +840,66 @@ def create_pending_order():
         "dinero_norte_linea": 0,
         "nota": "",
     })
-    return pedido_id, pedido_num
+    return pedido_id, num
 
 
 def pending_orders():
-    df = load_pedidos()
+    df = load_orders()
     if df.empty:
         return []
-
     pending = df[df["estado"] == "pendiente"].copy()
     if pending.empty:
         return []
 
-    result = []
+    orders = []
     for pedido_id, group in pending.groupby("pedido_id", sort=False):
         if not str(pedido_id).strip():
             continue
-        total = float(group["total_linea"].sum())
         num = int(pd.to_numeric(group["pedido_numero"], errors="coerce").fillna(0).max())
         fecha = str(group["fecha"].iloc[0])
-        result.append({
+        total = float(group["total_linea"].sum())
+        orders.append({
             "pedido_id": pedido_id,
             "pedido_numero": num,
-            "fecha": fecha,
-            "total": total,
             "label": f"Pedido {num} · {fecha} · {pesos(total)}",
         })
-    return result
+    return orders
 
 
-def add_line_to_order(pedido_id, product_name, qty):
+def get_order_lines(pedido_id, keep_index=False):
+    df = load_orders()
+    if df.empty:
+        return pd.DataFrame(columns=SHEETS["pedidos"]["headers"])
+    lines = df[
+        (df["pedido_id"].astype(str) == str(pedido_id))
+        & (df["estado"] == "pendiente")
+        & (df["producto"].astype(str).str.strip() != "")
+    ].copy()
+    return lines if keep_index else lines.reset_index(drop=True)
+
+
+def add_product_to_order(pedido_id, product_name, qty):
     products = load_products(active_only=True)
-    match = products[products["producto"] == product_name]
-
-    if match.empty:
+    row = products[products["producto"] == product_name]
+    if row.empty:
         st.error("No encontré el producto.")
         return
 
-    row = match.iloc[0]
-    line = calculate_line(row["producto"], qty, row["precio"], row["ganancia_personal"])
+    product = row.iloc[0]
+    line = calculate_line(product["producto"], qty, product["precio"], product["ganancia_personal"])
 
-    pedidos = load_pedidos()
-    current = pedidos[pedidos["pedido_id"] == pedido_id]
+    orders = load_orders()
+    current = orders[orders["pedido_id"] == pedido_id]
     if current.empty:
         st.error("No encontré el pedido.")
         return
 
-    pedido_num = int(current["pedido_numero"].max())
+    num = int(current["pedido_numero"].max())
 
     append_record("pedidos", {
-        **datetime_record(),
+        **record_datetime(),
         "pedido_id": pedido_id,
-        "pedido_numero": pedido_num,
+        "pedido_numero": num,
         "estado": "pendiente",
         "producto": line["producto"],
         "cantidad": line["cantidad"],
@@ -919,42 +912,25 @@ def add_line_to_order(pedido_id, product_name, qty):
     })
 
 
-def get_order_lines(pedido_id, keep_index=False):
-    df = load_pedidos()
-    if df.empty:
-        return pd.DataFrame(columns=SHEETS["pedidos"]["headers"])
-
-    lines = df[
-        (df["pedido_id"].astype(str) == str(pedido_id))
-        & (df["estado"] == "pendiente")
-        & (df["producto"].astype(str).str.strip() != "")
-    ].copy()
-
-    return lines if keep_index else lines.reset_index(drop=True)
-
-
 def remove_order_line(row_index):
-    df = load_pedidos()
-    if df.empty:
-        return
+    df = load_orders()
     if row_index in df.index:
         df.loc[row_index, "estado"] = "eliminado"
-        save_pedidos_df(df)
+        save_orders(df)
 
 
 def cancel_order(pedido_id):
-    df = load_pedidos()
+    df = load_orders()
     if df.empty:
         return
-
     mask = (df["pedido_id"].astype(str) == str(pedido_id)) & (df["estado"] == "pendiente")
     df.loc[mask, "estado"] = "cancelado"
-    save_pedidos_df(df)
+    save_orders(df)
 
 
 def order_totals(lines):
     if lines.empty:
-        return {"total": 0, "profit": 0, "norte": 0}
+        return {"total": 0.0, "profit": 0.0, "norte": 0.0}
     return {
         "total": round(float(lines["total_linea"].sum()), 2),
         "profit": round(float(lines["ganancia_personal_linea"].sum()), 2),
@@ -962,10 +938,10 @@ def order_totals(lines):
     }
 
 
-def pay_order(pedido_id, payment_method, payment_date_record, note):
+def pay_order(pedido_id, method, sale_datetime, note):
     lines = get_order_lines(pedido_id)
     if lines.empty:
-        st.error("Este pedido no tiene artículos pendientes.")
+        st.error("Este pedido no tiene artículos.")
         return
 
     totals = order_totals(lines)
@@ -974,89 +950,74 @@ def pay_order(pedido_id, payment_method, payment_date_record, note):
         st.error("El pedido tiene total cero.")
         return
 
-    card_fee_total = round(total * CARD_FEE_RATE, 2) if payment_method == "Tarjeta" else 0
-    movement_records = []
+    fee_total = round(total * CARD_FEE_RATE, 2) if method == "Tarjeta" else 0
+    records = []
 
     for _, item in lines.iterrows():
-        share = to_float(item["total_linea"]) / total
-        card_fee_line = round(card_fee_total * share, 2)
-
+        share = parse_money(item["total_linea"]) / total
+        fee_line = round(fee_total * share, 2)
         line = calculate_line(
             item["producto"],
             item["cantidad"],
             item["precio_unitario"],
             item["ganancia_personal_unitaria"],
-            card_fee=card_fee_line,
+            card_fee=fee_line,
         )
-
-        movement_records.append({
-            **payment_date_record,
+        records.append({
+            **sale_datetime,
             "tipo": "venta",
-            "movimiento_id": make_id(),
+            "movimiento_id": new_id(),
             "pedido_id": pedido_id,
             "pedido_numero": item.get("pedido_numero", ""),
             **line,
-            "metodo_pago": payment_method,
+            "metodo_pago": method,
             "monto": 0,
             "pagado_con": "",
             "nota": note,
         })
 
-    append_records("movimientos", movement_records)
+    append_records("movimientos", records)
 
-    df = load_pedidos()
+    df = load_orders()
     mask = (df["pedido_id"].astype(str) == str(pedido_id)) & (df["estado"] == "pendiente")
     df.loc[mask, "estado"] = "pagado"
-    save_pedidos_df(df)
+    save_orders(df)
 
-    big_paid("PEDIDO PAGADO", sum(r["total_neto_linea"] for r in movement_records))
+    big_paid("PEDIDO PAGADO", sum(r["total_neto_linea"] for r in records))
     st.success("Venta guardada correctamente.")
     st.rerun()
 
 
-# -----------------------------
-# MOVIMIENTOS: GUARDAR / EDITAR / ANULAR
-# -----------------------------
-
-def save_movimientos_df(df):
-    records = []
-    for _, row in df.iterrows():
-        record = {}
-        for h in SHEETS["movimientos"]["headers"]:
-            value = row.get(h, "")
-            if pd.isna(value):
-                value = ""
-            record[h] = value
-        records.append(record)
-    replace_records("movimientos", records)
-
+# -------------------------------------------------
+# EDITAR / ANULAR GASTOS
+# -------------------------------------------------
 
 def movement_label(idx, row):
     fecha = str(row.get("fecha_hora", ""))
     tipo = str(row.get("tipo", ""))
     producto = str(row.get("producto", ""))
-    amount = row.get("monto", 0) if to_float(row.get("monto", 0)) else row.get("total_linea", 0)
+    amount = row.get("monto", 0) if parse_money(row.get("monto", 0)) else row.get("total_linea", 0)
     return f"{idx} · {fecha} · {tipo} · {producto} · {pesos(amount)}"
 
 
-def edit_expense(row_index, fecha_record, name, amount, paid_with, note):
-    df = movimientos_df()
+def edit_expense(row_index, rec, name, amount_text, paid_with, note):
+    df = movements_df()
     if df.empty or row_index not in df.index:
         return False, "No encontré el gasto."
 
     if str(df.loc[row_index, "tipo"]) != "gasto":
         return False, "Solo se pueden editar gastos activos."
 
-    amount = round(to_float(amount), 2)
+    amount = parse_money(amount_text)
     if amount <= 0:
         return False, "El monto debe ser mayor que cero."
 
     if not str(name).strip():
-        return False, "El nombre del gasto no puede quedar vacío."
+        return False, "El gasto no puede quedar vacío."
 
-    df.loc[row_index, "fecha_hora"] = fecha_record["fecha_hora"]
-    df.loc[row_index, "fecha"] = fecha_record["fecha"]
-    df.loc[row_index, "hora"] = fecha_record["hora"]
+    df.loc[row_index, "fecha_hora"] = rec["fecha_hora"]
+    df.loc[row_index, "fecha"] = rec["fecha"]
+    df.loc[row_index, "hora"] = rec["hora"]
     df.loc[row_index, "producto"] = str(name).strip()
     df.loc[row_index, "monto"] = amount
     df.loc[row_index, "pagado_con"] = paid_with
@@ -1070,12 +1031,12 @@ def edit_expense(row_index, fecha_record, name, amount, paid_with, note):
         if col in df.columns:
             df.loc[row_index, col] = "" if col in ["pedido_id", "pedido_numero", "metodo_pago"] else 0
 
-    save_movimientos_df(df)
+    save_movements_df(df)
     return True, "Gasto actualizado."
 
 
 def void_expenses(row_indices, reason):
-    df = movimientos_df()
+    df = movements_df()
     if df.empty:
         return 0
 
@@ -1085,32 +1046,30 @@ def void_expenses(row_indices, reason):
             continue
         if str(df.loc[idx, "tipo"]) != "gasto":
             continue
-
         old_note = str(df.loc[idx, "nota"])
         df.loc[idx, "tipo"] = "gasto_anulado"
         df.loc[idx, "nota"] = f"{old_note} | ANULADO: {reason}".strip(" |")
         count += 1
 
     if count:
-        save_movimientos_df(df)
-
+        save_movements_df(df)
     return count
 
 
-# -----------------------------
+# -------------------------------------------------
 # PÁGINAS
-# -----------------------------
+# -------------------------------------------------
 
 def page_pedidos():
     st.header("Pedidos")
 
-    products = load_products(active_only=True)
+    products = load_products(True)
     if products.empty:
         st.warning("No hay productos activos.")
         return
 
     if st.button("Crear nuevo pedido"):
-        _, num = create_pending_order()
+        _, num = create_order()
         st.success(f"Pedido {num} creado.")
         st.rerun()
 
@@ -1119,26 +1078,25 @@ def page_pedidos():
         st.info("No hay pedidos pendientes.")
         return
 
-    selected_label = st.selectbox("Pedido pendiente", [o["label"] for o in orders])
-    selected = next(o for o in orders if o["label"] == selected_label)
+    label = st.selectbox("Pedido pendiente", [o["label"] for o in orders])
+    selected = next(o for o in orders if o["label"] == label)
     pedido_id = selected["pedido_id"]
 
     st.subheader(f"Pedido {selected['pedido_numero']}")
 
-    st.write("Agregar artículos")
     cols = st.columns(2)
-    for idx, row in products.iterrows():
-        label = f"{row['producto']} · {pesos(row['precio'])}"
-        if cols[idx % 2].button(label, key=f"add_fast_{pedido_id}_{idx}"):
-            add_line_to_order(pedido_id, row["producto"], 1)
+    for i, row in products.iterrows():
+        button_label = f"{row['producto']} · {pesos(row['precio'])}"
+        if cols[i % 2].button(button_label, key=f"fast_{pedido_id}_{i}"):
+            add_product_to_order(pedido_id, row["producto"], 1)
             st.rerun()
 
     with st.expander("Agregar con cantidad"):
         c1, c2 = st.columns([2, 1])
         product_name = c1.selectbox("Producto", products["producto"].tolist(), key=f"prod_{pedido_id}")
         qty = c2.number_input("Cantidad", min_value=1, value=1, step=1, key=f"qty_{pedido_id}")
-        if st.button("Agregar al pedido", key=f"add_qty_{pedido_id}"):
-            add_line_to_order(pedido_id, product_name, qty)
+        if st.button("Agregar al pedido", key=f"add_{pedido_id}"):
+            add_product_to_order(pedido_id, product_name, qty)
             st.rerun()
 
     st.divider()
@@ -1147,12 +1105,12 @@ def page_pedidos():
     if lines.empty:
         st.info("Este pedido todavía no tiene artículos.")
     else:
-        for original_idx, item in lines.iterrows():
+        for idx, item in lines.iterrows():
             c1, c2, c3 = st.columns([3, 1, 1])
-            c1.write(f"**{item['producto']}** x {safe_int(item['cantidad'])}")
+            c1.write(f"**{item['producto']}** x {parse_int(item['cantidad'])}")
             c2.write(pesos(item["total_linea"]))
-            if c3.button("Quitar", key=f"remove_{pedido_id}_{original_idx}"):
-                remove_order_line(original_idx)
+            if c3.button("Quitar", key=f"remove_{pedido_id}_{idx}"):
+                remove_order_line(idx)
                 st.rerun()
 
         totals = order_totals(lines)
@@ -1162,14 +1120,14 @@ def page_pedidos():
         c1.metric("Para mi paga", pesos(totals["profit"]))
         c2.metric("Para Norte Brunch", pesos(totals["norte"]))
 
-        sale_date = selected_datetime_record(f"sale_{pedido_id}", "Fecha y hora de la venta")
+        sale_dt = datetime_picker(f"sale_{pedido_id}", "Fecha y hora de la venta")
         method = st.selectbox("Método de pago", ["Efectivo", "Tarjeta", "Transferencia"], key=f"method_{pedido_id}")
         if method == "Tarjeta":
             st.warning(f"Comisión terminal: {pesos(totals['total'] * CARD_FEE_RATE)}")
         note = st.text_input("Nota", key=f"note_{pedido_id}")
 
         if st.button("Cobrar pedido", key=f"pay_{pedido_id}"):
-            pay_order(pedido_id, method, sale_date, note)
+            pay_order(pedido_id, method, sale_dt, note)
 
     st.divider()
     if st.button("Cancelar pedido completo", key=f"cancel_{pedido_id}"):
@@ -1181,66 +1139,81 @@ def page_pedidos():
 def page_gastos():
     st.header("Gastos")
 
-    with st.form("new_expense"):
-        rec = selected_datetime_record("expense_new", "Fecha y hora del gasto")
-        name = st.text_input("Gasto", placeholder="Ej. pan, carne, renta, gasolina")
-        amount_text = money_text_input("Monto", key="new_expense_amount", placeholder="Ej. 202.50")
-        amount = to_float(amount_text)
-        st.caption("Puedes escribir 202.5, 202.50 o 202,50. Luego toca Guardar gasto una sola vez.")
-        paid_with = st.radio("Pagado con", ["Dinero de Norte Brunch", "Mi dinero personal"])
-        note = st.text_input("Nota", placeholder="Opcional")
-        save = st.form_submit_button("Guardar gasto")
+    st.subheader("Registrar gasto")
+    expense_dt = datetime_picker("expense_new", "Fecha y hora del gasto")
+    name = st.text_input("Gasto", placeholder="Ej. pan", key="expense_name")
+    amount_text = money_input("Monto", key="expense_amount", placeholder="Ej. 202.50")
+    st.caption("Escribe el gasto y el monto. Luego toca Guardar gasto una sola vez.")
+    paid_with = st.radio("Pagado con", ["Dinero de Norte Brunch", "Mi dinero personal"], key="expense_paid")
+    note = st.text_input("Nota", placeholder="Opcional", key="expense_note")
 
-    if save:
-        if not name.strip() or amount <= 0:
-            st.error("Falta gasto o monto.")
-        else:
-            append_record("movimientos", {
-                **rec,
-                "tipo": "gasto",
-                "movimiento_id": make_id(),
-                "producto": name.strip(),
-                "monto": round(to_float(amount), 2),
-                "pagado_con": paid_with,
-                "nota": note,
-            })
-            st.success("Gasto guardado.")
-            st.rerun()
+    if st.button("Guardar gasto", key="save_expense"):
+        amount = parse_money(amount_text)
+
+        if not name.strip():
+            st.error("Escribe el nombre del gasto. Ejemplo: pan")
+            return
+
+        if amount <= 0:
+            st.error("Escribe un monto válido. Ejemplo: 202.50")
+            return
+
+        append_record("movimientos", {
+            **expense_dt,
+            "tipo": "gasto",
+            "movimiento_id": new_id(),
+            "pedido_id": "",
+            "pedido_numero": "",
+            "producto": name.strip(),
+            "cantidad": 0,
+            "precio_unitario": 0,
+            "ganancia_personal_unitaria": 0,
+            "total_linea": 0,
+            "ganancia_personal_linea": 0,
+            "dinero_norte_linea": 0,
+            "metodo_pago": "",
+            "comision_terminal_linea": 0,
+            "total_neto_linea": 0,
+            "monto": amount,
+            "pagado_con": paid_with,
+            "nota": note,
+        })
+        st.success(f"Gasto guardado: {name.strip()} · {pesos(amount)}")
+        st.balloons()
+        st.rerun()
 
     st.divider()
     start, end = period_picker("gastos")
-    gastos = filter_by_dates(gastos_df(), start, end)
+    gastos = filter_dates(gastos_df(), start, end)
     st.metric("Gastos del periodo", pesos(gastos["monto"].sum() if not gastos.empty else 0))
     st.dataframe(gastos, use_container_width=True)
 
     if not gastos.empty:
         label_map = {movement_label(idx, row): idx for idx, row in gastos.iterrows()}
 
-        with st.expander("Editar un gasto"):
-            selected = st.selectbox("Selecciona gasto", list(label_map.keys()), key="edit_expense_select")
-            idx = label_map[selected]
+        with st.expander("Editar gasto"):
+            selected_label = st.selectbox("Selecciona gasto", list(label_map.keys()), key="edit_expense_select")
+            idx = label_map[selected_label]
             row = gastos.loc[idx]
 
             current_dt = pd.to_datetime(row.get("fecha_hora", ""), errors="coerce")
             if pd.isna(current_dt):
-                current_dt = mx_now()
+                current_dt = now_mx()
             else:
-                current_dt = current_dt.to_pydatetime().replace(tzinfo=TIMEZONE)
+                current_dt = current_dt.to_pydatetime().replace(tzinfo=TZ)
 
-            with st.form("edit_expense_form"):
-                edited_rec = selected_datetime_record("expense_edit", "Fecha y hora corregida", current_dt)
-                edited_name = st.text_input("Gasto", value=str(row.get("producto", "")))
-                edited_amount_text = money_text_input("Monto", key="edit_expense_amount", value=str(to_float(row.get("monto", 0))), placeholder="Ej. 202.50")
-                edited_amount = to_float(edited_amount_text)
-                options = ["Dinero de Norte Brunch", "Mi dinero personal"]
-                current_paid = str(row.get("pagado_con", "Dinero de Norte Brunch"))
-                paid_index = options.index(current_paid) if current_paid in options else 0
-                edited_paid = st.radio("Pagado con", options, index=paid_index)
-                edited_note = st.text_input("Nota", value=str(row.get("nota", "")))
-                submit = st.form_submit_button("Guardar cambios")
+            edit_dt = datetime_picker("expense_edit", "Fecha y hora corregida", current_dt)
+            edit_name = st.text_input("Gasto", value=str(row.get("producto", "")), key="edit_expense_name")
+            edit_amount = money_input("Monto", key="edit_expense_amount", value=str(parse_money(row.get("monto", 0))), placeholder="Ej. 202.50")
 
-            if submit:
-                ok, msg = edit_expense(idx, edited_rec, edited_name, edited_amount, edited_paid, edited_note)
+            options = ["Dinero de Norte Brunch", "Mi dinero personal"]
+            current_paid = str(row.get("pagado_con", "Dinero de Norte Brunch"))
+            paid_index = options.index(current_paid) if current_paid in options else 0
+            edit_paid = st.radio("Pagado con", options, index=paid_index, key="edit_expense_paid")
+            edit_note = st.text_input("Nota", value=str(row.get("nota", "")), key="edit_expense_note")
+
+            if st.button("Guardar cambios del gasto", key="save_edit_expense"):
+                ok, msg = edit_expense(idx, edit_dt, edit_name, edit_amount, edit_paid, edit_note)
                 if ok:
                     st.success(msg)
                     st.rerun()
@@ -1249,7 +1222,7 @@ def page_gastos():
 
         with st.expander("Anular gastos duplicados o equivocados"):
             selected_void = st.multiselect("Selecciona gastos para anular", list(label_map.keys()))
-            reason = st.text_input("Motivo", placeholder="Ej. duplicado, prueba, error de monto")
+            reason = st.text_input("Motivo", placeholder="Ej. duplicado", key="void_reason")
             if st.button("Anular gastos seleccionados"):
                 indices = [label_map[x] for x in selected_void]
                 count = void_expenses(indices, reason)
@@ -1274,8 +1247,6 @@ def page_saldos():
 
     st.divider()
     st.subheader("Balance operativo")
-    st.caption("Ventas netas contra gastos. La deuda se maneja aparte.")
-
     b1, b2 = st.columns(2)
     b1.metric("Ventas netas", pesos(bal["ventas_netas"]))
     b2.metric("Gastos", pesos(bal["gastos_total"]))
@@ -1298,18 +1269,16 @@ def page_saldos():
     tab1, tab2, tab3 = st.tabs(["Ajustar saldo", "Ajustar deuda", "Pagar deuda"])
 
     with tab1:
-        st.caption("Esto crea un ajuste por la diferencia entre el saldo actual y el saldo real.")
-        with st.form("saldo_adjust"):
-            new_balance_text = money_text_input("Saldo real de Norte Brunch", key="saldo_real_text", value=str(max(bal["saldo_norte"], 0)), placeholder="Ej. 10000.50")
-            new_balance = to_float(new_balance_text)
-            note = st.text_input("Nota", placeholder="Ej. conteo de caja")
-            submit = st.form_submit_button("Guardar ajuste de saldo")
-        if submit:
-            delta = round(to_float(new_balance) - bal["saldo_norte"], 2)
+        st.caption("Crea un ajuste por la diferencia entre saldo actual y saldo real.")
+        new_balance_text = money_input("Saldo real de Norte Brunch", key="saldo_real", value=str(max(bal["saldo_norte"], 0)), placeholder="Ej. 10000.50")
+        note = st.text_input("Nota", placeholder="Ej. conteo de caja", key="saldo_note")
+        if st.button("Guardar ajuste de saldo"):
+            new_balance = parse_money(new_balance_text)
+            delta = round(new_balance - bal["saldo_norte"], 2)
             append_record("movimientos", {
-                **datetime_record(),
+                **record_datetime(),
                 "tipo": "ajuste_saldo",
-                "movimiento_id": make_id(),
+                "movimiento_id": new_id(),
                 "monto": delta,
                 "nota": note or f"Ajuste de saldo a {pesos(new_balance)}",
             })
@@ -1317,18 +1286,16 @@ def page_saldos():
             st.rerun()
 
     with tab2:
-        st.caption("Esto crea un ajuste por la diferencia entre la deuda actual y la deuda real.")
-        with st.form("debt_adjust"):
-            new_debt_text = money_text_input("Deuda real de Norte Brunch hacia mí", key="deuda_real_text", value=str(max(bal["deuda"], 0)), placeholder="Ej. 1500.50")
-            new_debt = to_float(new_debt_text)
-            note = st.text_input("Nota", placeholder="Ej. ajuste inicial")
-            submit = st.form_submit_button("Guardar ajuste de deuda")
-        if submit:
-            delta = round(to_float(new_debt) - bal["deuda"], 2)
+        st.caption("Crea un ajuste por la diferencia entre deuda actual y deuda real.")
+        new_debt_text = money_input("Deuda real de Norte Brunch hacia mí", key="deuda_real", value=str(max(bal["deuda"], 0)), placeholder="Ej. 1500.50")
+        note = st.text_input("Nota", placeholder="Ej. ajuste inicial", key="debt_note")
+        if st.button("Guardar ajuste de deuda"):
+            new_debt = parse_money(new_debt_text)
+            delta = round(new_debt - bal["deuda"], 2)
             append_record("movimientos", {
-                **datetime_record(),
+                **record_datetime(),
                 "tipo": "ajuste_deuda",
-                "movimiento_id": make_id(),
+                "movimiento_id": new_id(),
                 "monto": delta,
                 "nota": note or f"Ajuste de deuda a {pesos(new_debt)}",
             })
@@ -1338,27 +1305,28 @@ def page_saldos():
     with tab3:
         suggested = min(bal["deuda"], max(bal["saldo_norte"] - DEBT_ALERT_MIN_BALANCE, 0))
         st.info(f"Pago sugerido sin bajar de $10,000: {pesos(suggested)}")
-        with st.form("debt_pay"):
-            amount_text = money_text_input("Monto para pagar deuda", key="pago_deuda_text", value=str(max(suggested, 0)), placeholder="Ej. 500.50")
-            amount = to_float(amount_text)
-            note = st.text_input("Nota", placeholder="Ej. abono de deuda")
-            submit = st.form_submit_button("Registrar pago de deuda")
-        if submit:
+        pay_text = money_input("Monto para pagar deuda", key="pago_deuda", value=str(max(suggested, 0)), placeholder="Ej. 500.50")
+        note = st.text_input("Nota", placeholder="Ej. abono de deuda", key="pay_debt_note")
+        if st.button("Registrar pago de deuda"):
+            amount = parse_money(pay_text)
+            max_pay = min(bal["deuda"], bal["saldo_norte"])
             if amount <= 0:
                 st.error("El monto debe ser mayor a cero.")
+            elif amount > max_pay:
+                st.error(f"No puedes pagar más de {pesos(max_pay)}.")
             else:
                 append_record("movimientos", {
-                    **datetime_record(),
+                    **record_datetime(),
                     "tipo": "pago_deuda",
-                    "movimiento_id": make_id(),
-                    "monto": round(to_float(amount), 2),
+                    "movimiento_id": new_id(),
+                    "monto": amount,
                     "nota": note,
                 })
                 st.success("Pago de deuda registrado.")
                 st.rerun()
 
     with st.expander("Movimientos de deuda"):
-        st.dataframe(debt_df(), use_container_width=True)
+        st.dataframe(debt_movements_df(), use_container_width=True)
 
 
 def page_pago_personal():
@@ -1395,9 +1363,9 @@ def page_pago_personal():
         confirm = st.checkbox("Confirmo que deseo registrar mi pago personal", disabled=not allowed)
         if st.button("Registrar pago personal", disabled=(not allowed or not confirm)):
             append_record("movimientos", {
-                **datetime_record(),
+                **record_datetime(),
                 "tipo": "pago_personal",
-                "movimiento_id": make_id(),
+                "movimiento_id": new_id(),
                 "monto": amount,
                 "nota": f"Diezmo sugerido: {pesos(tithe)}. Pago libre: {pesos(free)}.",
             })
@@ -1416,25 +1384,26 @@ def page_productos():
     selected = st.selectbox("Producto", options)
 
     if selected == "Nuevo producto":
-        default = {"producto": "", "precio": 0.0, "ganancia_personal": 0.0, "activo": "si"}
+        default = {"producto": "", "precio": "", "ganancia_personal": "", "activo": "si"}
     else:
         default = df[df["producto"] == selected].iloc[0].to_dict()
 
-    with st.form("product_form"):
-        name = st.text_input("Nombre", value=str(default.get("producto", "")))
-        price_text = money_text_input("Precio", key="product_price_text", value=str(to_float(default.get("precio", 0))), placeholder="Ej. 95.00")
-        price = to_float(price_text)
-        profit_text = money_text_input("Ganancia personal", key="product_profit_text", value=str(to_float(default.get("ganancia_personal", 0))), placeholder="Ej. 40.00")
-        profit = to_float(profit_text)
-        active = st.selectbox("Activo", ["si", "no"], index=0 if str(default.get("activo", "si")) != "no" else 1)
-        submit = st.form_submit_button("Guardar")
+    name = st.text_input("Nombre", value=str(default.get("producto", "")), key="product_name")
+    price_text = money_input("Precio", key="product_price", value=str(default.get("precio", "")), placeholder="Ej. 95")
+    profit_text = money_input("Ganancia personal", key="product_profit", value=str(default.get("ganancia_personal", "")), placeholder="Ej. 40")
+    active = st.selectbox("Activo", ["si", "no"], index=0 if str(default.get("activo", "si")) != "no" else 1)
 
-    if submit:
+    if st.button("Guardar producto"):
         if not name.strip():
             st.error("Escribe el nombre.")
         else:
             df = load_products(active_only=False)
-            record = {"producto": name.strip(), "precio": price, "ganancia_personal": profit, "activo": active}
+            record = {
+                "producto": name.strip(),
+                "precio": parse_money(price_text),
+                "ganancia_personal": parse_money(profit_text),
+                "activo": active,
+            }
 
             if selected != "Nuevo producto" and selected in df["producto"].tolist():
                 df.loc[df["producto"] == selected, ["producto", "precio", "ganancia_personal", "activo"]] = [
@@ -1476,7 +1445,7 @@ def report_data(ventas):
 
 
 def show_period_report(title, start, end):
-    ventas = filter_by_dates(ventas_df(), start, end)
+    ventas = filter_dates(ventas_df(), start, end)
     st.subheader(title)
 
     if ventas.empty:
@@ -1507,8 +1476,8 @@ def page_reportes():
     st.header("Reportes")
 
     start, end = period_picker("reportes")
-    ventas = filter_by_dates(ventas_df(), start, end)
-    gastos = filter_by_dates(gastos_df(), start, end)
+    ventas = filter_dates(ventas_df(), start, end)
+    gastos = filter_dates(gastos_df(), start, end)
 
     ventas_brutas = ventas["total_linea"].sum() if not ventas.empty else 0
     ventas_netas = ventas["total_neto_linea"].sum() if not ventas.empty else 0
@@ -1525,7 +1494,6 @@ def page_reportes():
 
     if not ventas.empty:
         top_day, top_sold, top_profit, by_day, by_product = report_data(ventas)
-
         st.subheader("Resumen")
         if top_day is not None:
             st.write(f"**Día que más se vende:** {top_day['dia_semana']} con {pesos(top_day['ventas'])}.")
@@ -1533,10 +1501,9 @@ def page_reportes():
             st.write(f"**Producto más vendido:** {top_sold['producto']} con {top_sold['cantidad']:g} unidades.")
         if top_profit is not None:
             st.write(f"**Producto con más ganancia:** {top_profit['producto']} con {pesos(top_profit['ganancia'])}.")
-
         st.write("Productos")
         st.dataframe(by_product.sort_values("ganancia", ascending=False), use_container_width=True)
-        st.write("Días de la semana")
+        st.write("Días")
         st.dataframe(by_day, use_container_width=True)
 
     st.divider()
@@ -1550,13 +1517,13 @@ def page_reportes():
 def page_historial():
     st.header("Historial")
 
-    df = movimientos_df()
+    df = movements_df()
     if df.empty:
         st.info("Todavía no hay movimientos.")
         return
 
     start, end = period_picker("historial")
-    filtered = filter_by_dates(df, start, end)
+    filtered = filter_dates(df, start, end)
 
     types = sorted([t for t in filtered["tipo"].astype(str).unique().tolist() if t])
     selected_type = st.selectbox("Tipo", ["Todos"] + types)
@@ -1593,7 +1560,6 @@ def page_historial():
         "monto", "pagado_con", "metodo_pago", "nota",
     ]
     cols = [c for c in cols if c in filtered.columns]
-
     st.dataframe(filtered.sort_values("fecha_hora", ascending=False)[cols], use_container_width=True)
 
     with st.expander("Resumen por tipo"):
@@ -1611,6 +1577,17 @@ def page_historial():
 
 def page_diagnostico():
     st.header("Diagnóstico")
+
+    if st.button("Probar guardado rápido en Movimientos"):
+        append_record("movimientos", {
+            **record_datetime(),
+            "tipo": "diagnostico",
+            "movimiento_id": new_id(),
+            "producto": "prueba",
+            "monto": 1,
+            "nota": "Prueba de guardado desde la app",
+        })
+        st.success("Prueba guardada. Si ves este mensaje, Google Sheets sí está aceptando registros.")
 
     for key, info in SHEETS.items():
         df = load_df(key)
@@ -1645,16 +1622,17 @@ def check_password():
 
 def main():
     st.set_page_config(page_title=APP_TITLE, page_icon="🥪", layout="centered")
-    apply_mobile_style()
-    render_header()
+    apply_style()
+    header()
 
     if not check_password():
         return
 
     try:
-        setup_workbook()
-    except Exception:
-        st.error("No se pudo conectar con Google Sheets. Revisa permisos, Secrets o cuota.")
+        setup_sheets()
+    except Exception as error:
+        st.error("No se pudo conectar con Google Sheets.")
+        st.exception(error)
         st.stop()
 
     if st.sidebar.button("Actualizar datos"):
